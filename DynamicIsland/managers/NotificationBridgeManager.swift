@@ -4,6 +4,12 @@ import Defaults
 import SwiftUI
 import AppKit
 
+/// The store and presenter for MerMotion app notifications.
+///
+/// This type owns *what* is shown and *when*; it does not talk to any chat
+/// server. Sources push in through `ingest(_:)` -- today only
+/// ``MattermostClient``, which is started and stopped from here so flipping a
+/// settings toggle takes effect without a relaunch.
 @MainActor
 final class NotificationBridgeManager: ObservableObject {
     static let shared = NotificationBridgeManager()
@@ -11,128 +17,144 @@ final class NotificationBridgeManager: ObservableObject {
     // MARK: - Published Properties
     @Published private(set) var notifications: [AppNotification] = []
     @Published private(set) var unreadCount: Int = 0
-    @Published private(set) var isMerMotionEnabled: Bool = true
     @Published private(set) var latestNotification: AppNotification?
 
     // MARK: - Private Properties
     private var cancellables = Set<AnyCancellable>()
     private let maxNotifications = 50
-    private var pollingTimer: Timer?
+    private var hasStarted = false
 
-    // App Group configuration
-    private let appGroupIdentifier = "group.com.cauatoledo.mmnotify"
-    private let notificationsKey = "notifications"
+    /// The last notification actually shown in the notch, so a source that
+    /// re-delivers something cannot make the same message pop twice.
+    private var lastPresentedID: String?
+
+    /// Restored history is a backlog, not news -- nothing pops until this is true.
+    private var hasCompletedInitialLoad = false
+
+    /// Belt to `lastPresentedID`'s braces: a source replaying old messages with
+    /// fresh ids gets at most one stale pop instead of a rolling stream.
+    private static let popupFreshnessWindow: TimeInterval = 120
+
+    private static let storeURL: URL = {
+        let base = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!
+        let dir = base.appendingPathComponent("DynamicIsland", isDirectory: true)
+            .appendingPathComponent("MerMotion", isDirectory: true)
+        try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        return dir.appendingPathComponent("notifications.json")
+    }()
 
     // MARK: - Initialization
 
-    private init() {
-        setupDefaultsObservation()
-        loadNotificationsFromAppGroup()
-        setupAppGroupPolling()
-    }
+    /// Deliberately inert. The singleton is held as an `AppDelegate` stored
+    /// property, so it is constructed before the app has finished launching;
+    /// everything with a side effect waits for `start()`.
+    private init() {}
 
-    // MARK: - Setup
+    // MARK: - Lifecycle
 
-    private func setupDefaultsObservation() {
-        // Observe MerMotion toggle changes
+    /// Starts the bridge. Idempotent.
+    func start() {
+        guard !hasStarted else { return }
+        hasStarted = true
+
+        loadPersisted()
+        hasCompletedInitialLoad = true
+
         Defaults.publisher(.enableMerMotion)
             .receive(on: DispatchQueue.main)
-            .sink { [weak self] change in
-                self?.isMerMotionEnabled = change.newValue
-            }
+            .sink { [weak self] _ in self?.syncSources() }
             .store(in: &cancellables)
+
+        Defaults.publisher(.enableMattermostNotifications)
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] _ in self?.syncSources() }
+            .store(in: &cancellables)
+
+        syncSources()
     }
 
-    private func setupAppGroupPolling() {
-        // Poll App Group every 2 seconds for new notifications
-        // This is a fallback for when Darwin notifications aren't available
-        pollingTimer = Timer.scheduledTimer(withTimeInterval: 2.0, repeats: true) { [weak self] _ in
-            Task { @MainActor in
-                self?.loadNotificationsFromAppGroup()
-            }
-        }
+    func stop() {
+        cancellables.removeAll()
+        MattermostClient.shared.disconnect()
+        hasStarted = false
     }
 
-    // MARK: - App Group Communication
+    private func syncSources() {
+        guard hasStarted else { return }
 
-    private func loadNotificationsFromAppGroup() {
-        guard let userDefaults = UserDefaults(suiteName: appGroupIdentifier) else {
-            return
-        }
-
-        var parsed: [AppNotification] = []
-
-        // Try array of Data (JSON-encoded)
-        if let data = userDefaults.array(forKey: notificationsKey) as? [Data] {
-            for notificationData in data {
-                if let notification = try? JSONDecoder().decode(AppNotification.self, from: notificationData) {
-                    parsed.append(notification)
-                }
-            }
-        }
-        // Try array of JSON strings
-        else if let jsonStrings = userDefaults.array(forKey: notificationsKey) as? [String] {
-            for jsonString in jsonStrings {
-                if let data = jsonString.data(using: .utf8) {
-                    if let alert = try? JSONDecoder().decode(MattermostAlert.self, from: data) {
-                        parsed.append(alert.toAppNotification())
-                    } else if let notification = try? JSONDecoder().decode(AppNotification.self, from: data) {
-                        parsed.append(notification)
-                    }
-                }
-            }
-        }
-
-        if !parsed.isEmpty {
-            updateNotifications(parsed)
+        if Defaults[.enableMerMotion] && Defaults[.enableMattermostNotifications] {
+            MattermostClient.shared.connectIfConfigured()
+        } else {
+            MattermostClient.shared.disconnect()
         }
     }
 
-    private func updateNotifications(_ newNotifications: [AppNotification]) {
-        // Merge with existing notifications, avoiding duplicates
-        var allNotifications = notifications
+    // MARK: - Ingest
 
-        for notification in newNotifications {
-            if !allNotifications.contains(where: { $0.id == notification.id || ($0.sender == notification.sender && $0.body == notification.body && abs($0.timestamp.timeIntervalSince(notification.timestamp)) < 5) }) {
-                allNotifications.insert(notification, at: 0)
-            }
-        }
+    /// Accepts a message from a source. Safe to call with something already held:
+    /// duplicates are dropped by id and never re-pop.
+    func ingest(_ notification: AppNotification) {
+        ingest([notification])
+    }
 
-        // Limit the number of notifications
-        if allNotifications.count > maxNotifications {
-            allNotifications = Array(allNotifications.prefix(maxNotifications))
-        }
+    func ingest(_ incoming: [AppNotification]) {
+        let known = Set(notifications.map(\.id))
+        let fresh = incoming
+            .filter { !known.contains($0.id) }
+            .sorted { $0.timestamp > $1.timestamp }
 
-        notifications = allNotifications
+        guard !fresh.isEmpty else { return }
+
+        notifications = Array((fresh + notifications).prefix(maxNotifications))
         unreadCount = notifications.filter { !$0.isRead }.count
+        persist()
 
-        // Show popup for latest notification
-        if let latest = newNotifications.first {
-            showNotificationPopup(latest)
-        }
+        guard hasCompletedInitialLoad else { return }
+        guard let latest = fresh.first,
+              latest.id != lastPresentedID,
+              latest.timestamp.timeIntervalSinceNow > -Self.popupFreshnessWindow
+        else { return }
 
-        // Update Mattermost connection status
-        if !newNotifications.isEmpty {
-            Defaults[.mattermostConnected] = true
-        }
+        showNotificationPopup(latest)
     }
+
+    // MARK: - Presentation
 
     private func showNotificationPopup(_ notification: AppNotification) {
-        guard isMerMotionEnabled else { return }
+        guard Defaults[.enableMerMotion] else { return }
+        guard notification.source != "mattermost" || Defaults[.enableMattermostNotifications] else { return }
 
         latestNotification = notification
+        lastPresentedID = notification.id
 
-        // Show the notification popup in Dynamic Island
+        // The peek is one line, so the channel rides along with the sender and the
+        // subtitle carries the message. Putting the channel in the subtitle instead
+        // dropped the message entirely for anything posted in a channel.
+        let title: String = {
+            guard let channel = notification.channel, !channel.isEmpty else { return notification.sender }
+            return "\(notification.sender) · #\(channel)"
+        }()
+
         DynamicIslandViewCoordinator.shared.toggleSneakPeek(
             status: true,
             type: .appNotification(source: notification.source),
             duration: Defaults[.merMotionDuration],
             value: 0,
             icon: iconForSource(notification.source),
-            title: notification.sender,
-            subtitle: notification.channel ?? notification.body,
+            title: title,
+            subtitle: Self.clamped(notification.body),
             accentColor: colorForType(notification.type)
         )
+    }
+
+    /// The peek scrolls its text once; an unclamped wall of text would still be
+    /// scrolling long after the peek was meant to hide.
+    private static func clamped(_ body: String) -> String {
+        let collapsed = body
+            .replacingOccurrences(of: "\n", with: " ")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        guard collapsed.count > 280 else { return collapsed }
+        return collapsed.prefix(279) + "…"
     }
 
     // MARK: - Public Methods
@@ -141,7 +163,7 @@ final class NotificationBridgeManager: ObservableObject {
         if let index = notifications.firstIndex(where: { $0.id == id }) {
             notifications[index].isRead = true
             unreadCount = notifications.filter { !$0.isRead }.count
-            saveToAppGroup()
+            persist()
         }
     }
 
@@ -150,22 +172,25 @@ final class NotificationBridgeManager: ObservableObject {
             notifications[index].isRead = true
         }
         unreadCount = 0
-        saveToAppGroup()
+        persist()
     }
 
     func removeNotification(_ id: String) {
         notifications.removeAll { $0.id == id }
         unreadCount = notifications.filter { !$0.isRead }.count
-        saveToAppGroup()
+        persist()
     }
 
     func clearAllNotifications() {
         notifications.removeAll()
         unreadCount = 0
-        saveToAppGroup()
+        latestNotification = nil
+        persist()
     }
 
     func addTestNotification() {
+        // A fresh id every press: each press really is a new notification, and it
+        // must get past the duplicate check that real messages go through.
         let testNotification = AppNotification(
             id: UUID().uuidString,
             type: .mention,
@@ -175,28 +200,27 @@ final class NotificationBridgeManager: ObservableObject {
             body: "This is a test notification from MerMotion!",
             timestamp: Date(),
             source: "mattermost",
-            link: URL(string: "https://example.com"),
+            link: nil,
             isRead: false
         )
 
-        notifications.insert(testNotification, at: 0)
-        unreadCount = notifications.filter { !$0.isRead }.count
-
-        // Show the popup
-        latestNotification = testNotification
-        showNotificationPopup(testNotification)
+        ingest(testNotification)
     }
 
     // MARK: - Persistence
 
-    private func saveToAppGroup() {
-        guard let userDefaults = UserDefaults(suiteName: appGroupIdentifier) else { return }
+    private func loadPersisted() {
+        guard let data = try? Data(contentsOf: Self.storeURL),
+              let stored = try? JSONDecoder().decode([AppNotification].self, from: data)
+        else { return }
 
-        let data = notifications.map { notification -> Data? in
-            try? JSONEncoder().encode(notification)
-        }.compactMap { $0 }
+        notifications = Array(stored.prefix(maxNotifications))
+        unreadCount = notifications.filter { !$0.isRead }.count
+    }
 
-        userDefaults.set(data, forKey: notificationsKey)
+    private func persist() {
+        guard let data = try? JSONEncoder().encode(notifications) else { return }
+        try? data.write(to: Self.storeURL, options: .atomic)
     }
 
     // MARK: - Helpers

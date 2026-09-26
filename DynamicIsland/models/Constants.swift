@@ -486,6 +486,21 @@ enum SneakPeekStyle: String, CaseIterable, Identifiable, Defaults.Serializable {
     }
 }
 
+// How an app notification is drawn under the closed notch
+enum MerMotionPeekStyle: String, CaseIterable, Identifiable, Defaults.Serializable {
+    case compact = "Compact"
+    case fullCard = "Full Card"
+
+    var id: String { self.rawValue }
+
+    var localizedName: String {
+        switch self {
+        case .compact: return String(localized: "Compact")
+        case .fullCard: return String(localized: "Full Card")
+        }
+    }
+}
+
 enum LogLevel: Int, CaseIterable, Identifiable, Defaults.Serializable {
     case none = 0
     case error = 1
@@ -1331,6 +1346,7 @@ extension Defaults.Keys {
     // MARK: MerMotion (App Notifications) Feature
     static let enableMerMotion = Key<Bool>("enableMerMotion", default: false)
     static let merMotionDuration = Key<Double>("merMotionDuration", default: 4.5)
+    static let merMotionPeekStyle = Key<MerMotionPeekStyle>("merMotionPeekStyle", default: .compact)
     static let enableMattermostNotifications = Key<Bool>("enableMattermostNotifications", default: true)
     static let mattermostServerURL = Key<String>("mattermostServerURL", default: "")
     static let mattermostUsername = Key<String>("mattermostUsername", default: "")

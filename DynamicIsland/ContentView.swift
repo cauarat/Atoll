@@ -1122,7 +1122,7 @@ struct ContentView: View {
                             styleOverride: batteryModel.activeTemporaryHUDKind.map { resolvedBatteryNotificationStyle(for: $0) }
                         )
                         .id(batteryModel.activeTemporaryHUDToken)
-                      } else if isSneakPeekVisibleOnCurrentScreen && (Defaults[.inlineHUD] || isAirPodsListeningModeSneak) && (coordinator.sneakPeek.type != .music) && (coordinator.sneakPeek.type != .battery) && (coordinator.sneakPeek.type != .timer) && (coordinator.sneakPeek.type != .reminder) && !coordinator.sneakPeek.type.isExtensionPayload && ((coordinator.sneakPeek.type != .volume && coordinator.sneakPeek.type != .brightness && coordinator.sneakPeek.type != .backlight) || vm.notchState == .closed) {
+                      } else if isSneakPeekVisibleOnCurrentScreen && (Defaults[.inlineHUD] || isAirPodsListeningModeSneak) && (coordinator.sneakPeek.type != .music) && (coordinator.sneakPeek.type != .battery) && (coordinator.sneakPeek.type != .timer) && (coordinator.sneakPeek.type != .reminder) && !coordinator.sneakPeek.type.isExtensionPayload && !coordinator.sneakPeek.type.isAppNotification && ((coordinator.sneakPeek.type != .volume && coordinator.sneakPeek.type != .brightness && coordinator.sneakPeek.type != .backlight) || vm.notchState == .closed) {
                           InlineHUD(type: $coordinator.sneakPeek.type, value: $coordinator.sneakPeek.value, icon: $coordinator.sneakPeek.icon, hoverAnimation: $isHovering, gestureProgress: $gestureProgress)
                               .transition(
                                   coordinator.sneakPeek.type == .capsLock
@@ -1176,7 +1176,7 @@ struct ContentView: View {
                        }
                       
                       if isSneakPeekVisibleOnCurrentScreen {
-                          if (coordinator.sneakPeek.type != .music) && (coordinator.sneakPeek.type != .battery) && (coordinator.sneakPeek.type != .timer) && (coordinator.sneakPeek.type != .reminder) && (coordinator.sneakPeek.type != .capsLock) && !coordinator.sneakPeek.type.isExtensionPayload && !Defaults[.inlineHUD] && !isAirPodsListeningModeSneak && ((coordinator.sneakPeek.type != .volume && coordinator.sneakPeek.type != .brightness && coordinator.sneakPeek.type != .backlight) || vm.notchState == .closed) {
+                          if (coordinator.sneakPeek.type != .music) && (coordinator.sneakPeek.type != .battery) && (coordinator.sneakPeek.type != .timer) && (coordinator.sneakPeek.type != .reminder) && (coordinator.sneakPeek.type != .capsLock) && !coordinator.sneakPeek.type.isExtensionPayload && !coordinator.sneakPeek.type.isAppNotification && !Defaults[.inlineHUD] && !isAirPodsListeningModeSneak && ((coordinator.sneakPeek.type != .volume && coordinator.sneakPeek.type != .brightness && coordinator.sneakPeek.type != .backlight) || vm.notchState == .closed) {
                               SystemEventIndicatorModifier(eventType: $coordinator.sneakPeek.type, value: $coordinator.sneakPeek.value, icon: $coordinator.sneakPeek.icon, sendEventBack: { _ in
                                   //
                               })
@@ -1256,6 +1256,46 @@ struct ContentView: View {
                                       }
                                   }
                                   .padding(.bottom, 10)
+                              }
+                          }
+                          // App notification sneak peek (MerMotion)
+                          else if case let .appNotification(source) = coordinator.sneakPeek.type {
+                              // Only while closed: with the notch open, the Notifications
+                              // tab is the full surface, and a peek would push it down.
+                              if vm.notchState == .closed && !vm.hideOnClosed && activeSneakPeekStyle == .standard {
+                                  let accent = (coordinator.sneakPeek.accentColor ?? .gray)
+                                      .ensureMinimumBrightness(factor: 0.7)
+                                  switch Defaults[.merMotionPeekStyle] {
+                                  case .compact:
+                                      GeometryReader { geo in
+                                          HStack(spacing: 6) {
+                                              Image(systemName: coordinator.sneakPeek.icon.isEmpty
+                                                    ? appNotificationSneakPeekIcon(for: source)
+                                                    : coordinator.sneakPeek.icon)
+                                                  .font(.system(size: 11, weight: .semibold))
+                                                  .foregroundStyle(accent)
+                                                  .frame(width: 12, height: 12)
+                                              MarqueeText(
+                                                  .constant(
+                                                      appNotificationSneakPeekText(
+                                                          title: coordinator.sneakPeek.title,
+                                                          subtitle: coordinator.sneakPeek.subtitle
+                                                      )
+                                                  ),
+                                                  textColor: accent,
+                                                  minDuration: 1,
+                                                  frameWidth: max(0, geo.size.width - 18)
+                                              )
+                                          }
+                                      }
+                                      .padding(.bottom, 10)
+                                  case .fullCard:
+                                      NotificationPeekView()
+                                          .frame(minWidth: 280)
+                                          .clipShape(RoundedRectangle(cornerRadius: 10))
+                                          .padding(.horizontal, 4)
+                                          .padding(.bottom, 10)
+                                  }
                               }
                           }
                       }
@@ -1365,6 +1405,24 @@ struct ContentView: View {
 
         guard !subtitle.isEmpty else { return title }
         return "\(title) • \(subtitle)"
+    }
+
+    private func appNotificationSneakPeekText(title: String, subtitle: String) -> String {
+        let sender = title.trimmingCharacters(in: .whitespacesAndNewlines)
+        let detail = subtitle.trimmingCharacters(in: .whitespacesAndNewlines)
+
+        guard !sender.isEmpty else { return detail }
+        guard !detail.isEmpty else { return sender }
+        return "\(sender) • \(detail)"
+    }
+
+    private func appNotificationSneakPeekIcon(for source: String) -> String {
+        switch source {
+        case "mattermost": return "bubble.left.and.bubble.right.fill"
+        case "slack": return "number.square.fill"
+        case "discord": return "gamecontroller.fill"
+        default: return "bell.fill"
+        }
     }
 
     private let reminderTimeFormatter: DateFormatter = {
@@ -2985,6 +3043,13 @@ struct ContentView: View {
         if case .extensionLiveActivity = coordinator.sneakPeek.type {
             return vm.notchState == .closed && style == .standard
         }
+
+        // Kept in lockstep with the render branch above: without this it fell into
+        // `isOtherSneak`, which is true whenever the notch is closed, so fixedSize()
+        // shrink-wrapped a row the branch had declined to draw.
+        if case .appNotification = coordinator.sneakPeek.type {
+            return vm.notchState == .closed && !vm.hideOnClosed && style == .standard
+        }
         
         // Original logic for other types
         let isMusicSneak = coordinator.sneakPeek.type == .music && vm.notchState == .closed && !vm.hideOnClosed && style == .standard
@@ -2997,6 +3062,9 @@ struct ContentView: View {
 
     private func resolvedSneakPeekStyle() -> SneakPeekStyle {
         if case .extensionLiveActivity = coordinator.sneakPeek.type {
+            return .standard
+        }
+        if case .appNotification = coordinator.sneakPeek.type {
             return .standard
         }
         return coordinator.sneakPeek.styleOverride ?? Defaults[.sneakPeekStyles]

@@ -76,6 +76,13 @@ extension SneakContentType {
         }
         return false
     }
+
+    var isAppNotification: Bool {
+        if case .appNotification = self {
+            return true
+        }
+        return false
+    }
 }
 
 struct sneakPeek {
@@ -102,7 +109,7 @@ class DynamicIslandViewCoordinator: ObservableObject {
     private var cancellables = Set<AnyCancellable>()
     private var hoverOpenSuppressedUntil: Date = .distantPast
     
-    private static let tabOrder: [NotchViews] = [.home, .shelf, .timer, .stats, .llmUsage, .colorPicker, .notes, .clipboard, .terminal, .extensionExperience]
+    private static let tabOrder: [NotchViews] = [.home, .shelf, .timer, .stats, .llmUsage, .colorPicker, .notes, .clipboard, .terminal, .notifications, .extensionExperience]
     
     /// Direction of the most recent tab switch (true = forward/right, false = backward/left)
     @Published var tabSwitchForward: Bool = true
@@ -342,21 +349,19 @@ class DynamicIslandViewCoordinator: ObservableObject {
             resolvedDuration = Defaults[.reminderSneakPeekDuration]
         case .extensionLiveActivity:
             resolvedDuration = duration
+        case .appNotification:
+            resolvedDuration = Defaults[.merMotionDuration]
         default:
             resolvedDuration = duration
         }
         sneakPeekDuration = resolvedDuration
         let bypassedTypes: [SneakContentType] = [.music, .timer, .reminder, .bluetoothAudio]
         
-        // Check if it's an extension type
-        let isExtensionType: Bool
-        if case .extensionLiveActivity = type {
-            isExtensionType = true
-        } else {
-            isExtensionType = false
-        }
+        // Extension payloads and app notifications are content, not a system HUD --
+        // neither should disappear because the user replaced the macOS HUD or not.
+        let isAlwaysAllowed = type.isExtensionPayload || type.isAppNotification
         
-        if !isExtensionType && !bypassedTypes.contains(type) && !Defaults[.enableSystemHUD] {
+        if !isAlwaysAllowed && !bypassedTypes.contains(type) && !Defaults[.enableSystemHUD] {
             return
         }
         DispatchQueue.main.async {

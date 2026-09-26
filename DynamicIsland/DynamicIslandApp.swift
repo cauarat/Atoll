@@ -120,6 +120,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     let systemTimerBridge = SystemTimerBridge.shared
     let extensionXPCServiceHost = ExtensionXPCServiceHost.shared
     let extensionRPCServer = ExtensionRPCServer.shared
+    let notificationBridgeManager = NotificationBridgeManager.shared  // NEW: MerMotion app notifications
     var closeNotchWorkItem: DispatchWorkItem?
     private var previousScreens: [NSScreen]?
     private var onboardingWindowController: NSWindowController?
@@ -301,6 +302,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         extensionXPCServiceHost.stop()
         extensionRPCServer.stop()
         networkConnectivityManager.stopMonitoring()
+        notificationBridgeManager.stop()
         
         // Stop AudioTap capture
         AudioTap.shared.stopCapture()
@@ -771,6 +773,11 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         if !AppRuntimeEnvironment.isUITesting {
             PrivacyIndicatorManager.shared.startMonitoring()
             networkConnectivityManager.startMonitoring()
+        }
+
+        // Setup MerMotion notification bridge (app notifications in the notch)
+        if !AppRuntimeEnvironment.isUITesting {
+            notificationBridgeManager.start()
         }
         
         // Setup Real-time Audio Waveform capture if enabled

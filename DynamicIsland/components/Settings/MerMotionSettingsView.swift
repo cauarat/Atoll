@@ -4,39 +4,33 @@ import Combine
 
 struct MerMotionSettingsView: View {
     @ObservedObject private var notificationBridge = NotificationBridgeManager.shared
-    @ObservedObject private var coordinator = DynamicIslandViewCoordinator.shared
-    @EnvironmentObject var vm: DynamicIslandViewModel
+    @ObservedObject private var mattermost = MattermostClient.shared
 
     @Default(.enableMerMotion) private var merMotionEnabled
     @Default(.merMotionDuration) private var merMotionDuration
+    @Default(.merMotionPeekStyle) private var merMotionPeekStyle
     @Default(.enableMattermostNotifications) private var mattermostEnabled
     @Default(.mattermostServerURL) private var mattermostServerURL
-    @Default(.mattermostUsername) private var mattermostUsername
-    @Default(.mattermostConnected) private var mattermostConnected
 
+    @State private var tokenInput: String = MattermostTokenStore.shared.token
     @State private var testNotificationSent = false
-    @State private var showConnectionTest = false
 
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 20) {
-                // Header
                 headerSection
 
                 Divider()
 
-                // Main toggle
                 mainToggleSection
 
                 Divider()
 
-                // Notification display settings
                 if merMotionEnabled {
                     displaySettingsSection
 
                     Divider()
 
-                    // App integrations
                     appIntegrationsSection
                 }
             }
@@ -103,6 +97,21 @@ struct MerMotionSettingsView: View {
                 .font(.system(size: 13, weight: .semibold))
                 .foregroundColor(.secondary)
 
+            // Presentation style
+            VStack(alignment: .leading, spacing: 6) {
+                Picker("Notification Style", selection: $merMotionPeekStyle) {
+                    ForEach(MerMotionPeekStyle.allCases) { style in
+                        Text(style.localizedName).tag(style)
+                    }
+                }
+                .pickerStyle(.segmented)
+
+                Text("Compact shows one scrolling line under the notch. Full Card expands it with the sender, channel, message and buttons.")
+                    .font(.system(size: 11))
+                    .foregroundColor(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+
             // Duration slider
             VStack(alignment: .leading, spacing: 8) {
                 HStack {
@@ -162,7 +171,6 @@ struct MerMotionSettingsView: View {
                 .font(.system(size: 13, weight: .semibold))
                 .foregroundColor(.secondary)
 
-            // Mattermost
             mattermostIntegrationSection
         }
     }
@@ -182,10 +190,10 @@ struct MerMotionSettingsView: View {
 
                     HStack(spacing: 4) {
                         Circle()
-                            .fill(mattermostConnected ? Color.green : Color.gray)
+                            .fill(statusColor)
                             .frame(width: 6, height: 6)
 
-                        Text(mattermostConnected ? "Connected" : "Not connected")
+                        Text(statusText)
                             .font(.system(size: 11))
                             .foregroundColor(.secondary)
                     }
@@ -199,8 +207,7 @@ struct MerMotionSettingsView: View {
             }
 
             if mattermostEnabled {
-                // Connection details
-                VStack(alignment: .leading, spacing: 8) {
+                VStack(alignment: .leading, spacing: 10) {
                     // Server URL
                     VStack(alignment: .leading, spacing: 4) {
                         Text("Server URL")
@@ -210,63 +217,34 @@ struct MerMotionSettingsView: View {
                         TextField("https://mattermost.example.com", text: $mattermostServerURL)
                             .textFieldStyle(.roundedBorder)
                             .font(.system(size: 13))
+                            .disabled(mattermost.state.isConnected)
                     }
 
-                    // Username
+                    // Personal access token
                     VStack(alignment: .leading, spacing: 4) {
-                        Text("Username")
+                        Text("Personal Access Token")
                             .font(.system(size: 12, weight: .medium))
                             .foregroundColor(.secondary)
 
-                        TextField("username", text: $mattermostUsername)
+                        SecureField("Paste your token", text: $tokenInput)
                             .textFieldStyle(.roundedBorder)
                             .font(.system(size: 13))
+                            .disabled(mattermost.state.isConnected)
+
+                        Text("In Mattermost: Profile → Security → Personal Access Tokens → Create. Your server admin has to enable them first.")
+                            .font(.system(size: 11))
+                            .foregroundColor(.secondary)
+                            .fixedSize(horizontal: false, vertical: true)
+
+                        Text("The token is kept in your macOS Keychain, never in preferences.")
+                            .font(.system(size: 11))
+                            .foregroundColor(.secondary)
+                            .fixedSize(horizontal: false, vertical: true)
                     }
 
-                    // Connection instructions
-                    if !mattermostConnected {
-                        VStack(alignment: .leading, spacing: 6) {
-                            HStack(spacing: 6) {
-                                Image(systemName: "info.circle")
-                                    .font(.system(size: 11))
-                                Text("Setup Required")
-                                    .font(.system(size: 12, weight: .medium))
-                            }
-                            .foregroundColor(.orange)
+                    connectionControls
 
-                            Text("To receive Mattermost notifications, you need to run the mm-notify daemon with App Group support enabled.")
-                                .font(.system(size: 11))
-                                .foregroundColor(.secondary)
-                                .fixedSize(horizontal: false, vertical: true)
-
-                            Button(action: {
-                                copySetupInstructions()
-                            }) {
-                                HStack(spacing: 4) {
-                                    Image(systemName: "doc.on.doc")
-                                        .font(.system(size: 11))
-                                    Text("Copy Setup Instructions")
-                                        .font(.system(size: 12))
-                                }
-                            }
-                            .buttonStyle(.plain)
-                            .foregroundColor(.blue)
-                        }
-                        .padding(10)
-                        .background(Color.orange.opacity(0.1))
-                        .clipShape(RoundedRectangle(cornerRadius: 8))
-                    } else {
-                        // Connected info
-                        HStack(spacing: 6) {
-                            Image(systemName: "checkmark.circle.fill")
-                                .font(.system(size: 11))
-                                .foregroundColor(.green)
-                            Text("Receiving notifications from Mattermost")
-                                .font(.system(size: 12))
-                        }
-                        .foregroundColor(.secondary)
-
-                        // Stats
+                    if mattermost.state.isConnected {
                         HStack(spacing: 16) {
                             statBox(title: "Total", value: "\(notificationBridge.notifications.count)")
                             statBox(title: "Unread", value: "\(notificationBridge.unreadCount)")
@@ -279,6 +257,54 @@ struct MerMotionSettingsView: View {
         .padding(12)
         .background(Color(NSColor.controlBackgroundColor))
         .clipShape(RoundedRectangle(cornerRadius: 10))
+    }
+
+    private var connectionControls: some View {
+        HStack(spacing: 10) {
+            if mattermost.state.isConnected {
+                Button("Disconnect") {
+                    mattermost.disconnect()
+                }
+                .buttonStyle(.bordered)
+            } else {
+                Button(mattermost.state == .connecting ? "Connecting…" : "Connect") {
+                    // The token has to reach the Keychain before the client reads it.
+                    MattermostTokenStore.shared.setToken(tokenInput)
+                    mattermost.connect()
+                }
+                .buttonStyle(.borderedProminent)
+                .disabled(
+                    mattermost.state == .connecting
+                    || mattermostServerURL.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                    || tokenInput.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                )
+            }
+
+            if mattermost.state == .connecting {
+                ProgressView().controlSize(.small)
+            }
+        }
+    }
+
+    // MARK: - Status
+
+    private var statusColor: Color {
+        switch mattermost.state {
+        case .connected: return .green
+        case .connecting: return .yellow
+        case .failed: return .red
+        case .disconnected: return .gray
+        }
+    }
+
+    private var statusText: String {
+        switch mattermost.state {
+        case .connected(let username): return String(localized: "Connected as @\(username)")
+        case .connecting: return String(localized: "Connecting…")
+        // The actual reason, not a generic "Not connected".
+        case .failed(let reason): return reason
+        case .disconnected: return String(localized: "Not connected")
+        }
     }
 
     private func statBox(title: String, value: String) -> some View {
@@ -296,37 +322,6 @@ struct MerMotionSettingsView: View {
         .padding(.horizontal, 12)
         .background(Color.secondary.opacity(0.1))
         .clipShape(RoundedRectangle(cornerRadius: 6))
-    }
-
-    // MARK: - Helper Methods
-
-    private func copySetupInstructions() {
-        let instructions = """
-        MerMotion Setup Instructions for mm-notify
-        ===========================================
-
-        1. Make sure the mm-notify daemon is running:
-           cd /tmp/mattermost-notificator
-           node src/index.js
-
-        2. The daemon should automatically:
-           - Write notifications to App Group UserDefaults
-           - Send Darwin notifications to wake up Atoll
-
-        3. Verify connection:
-           - Open Atoll Settings > MerMotion
-           - You should see "Connected" status
-
-        For manual setup, ensure mm-notify writes to:
-           App Group: group.com.cauatoledo.mmnotify
-           Key: notifications
-        """
-
-        #if os(macOS)
-        let pasteboard = NSPasteboard.general
-        pasteboard.clearContents()
-        pasteboard.setString(instructions, forType: .string)
-        #endif
     }
 }
 

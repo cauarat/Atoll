@@ -26,7 +26,7 @@ struct NotificationPeekView: View {
 
                 Text(sourceName)
                     .font(.system(size: 13, weight: .semibold))
-                    .foregroundColor(.primary)
+                    .foregroundColor(.white)
 
                 Spacer()
 
@@ -46,7 +46,7 @@ struct NotificationPeekView: View {
                 VStack(alignment: .leading, spacing: 4) {
                     Text(notification.sender)
                         .font(.system(size: 14, weight: .medium))
-                        .foregroundColor(.primary)
+                        .foregroundColor(.white)
                         .lineLimit(1)
 
                     if let channel = notification.channel {
@@ -72,7 +72,7 @@ struct NotificationPeekView: View {
                 Button(action: {
                     if let id = latestNotification?.id {
                         notificationBridge.markAsRead(id)
-                        coordinator.toggleSneakPeek(status: false, type: .appNotification(source: "any"), duration: 0, value: 0, icon: "", title: "", subtitle: "", accentColor: nil)
+                        coordinator.toggleSneakPeek(status: false, type: coordinator.sneakPeek.type)
                     }
                 }) {
                     HStack(spacing: 4) {
@@ -97,7 +97,7 @@ struct NotificationPeekView: View {
                             if let id = latestNotification?.id {
                                 notificationBridge.markAsRead(id)
                             }
-                            coordinator.toggleSneakPeek(status: false, type: .appNotification(source: "any"), duration: 0, value: 0, icon: "", title: "", subtitle: "", accentColor: nil)
+                            coordinator.toggleSneakPeek(status: false, type: coordinator.sneakPeek.type)
                         }
                     }) {
                         HStack(spacing: 4) {
@@ -119,7 +119,7 @@ struct NotificationPeekView: View {
 
                 // View all button
                 Button(action: {
-                    coordinator.toggleSneakPeek(status: false, type: .appNotification(source: "any"), duration: 0, value: 0, icon: "", title: "", subtitle: "", accentColor: nil)
+                    coordinator.toggleSneakPeek(status: false, type: coordinator.sneakPeek.type)
                     coordinator.currentView = .notifications
                     vm.open()
                 }) {
@@ -134,7 +134,7 @@ struct NotificationPeekView: View {
             .padding(.bottom, 10)
         }
         .frame(maxWidth: .infinity)
-        .background(Color(NSColor.controlBackgroundColor))
+        .background(Color.black.opacity(0.85))
     }
 
     private var disabledView: some View {
