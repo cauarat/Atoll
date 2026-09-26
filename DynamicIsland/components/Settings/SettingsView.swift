@@ -827,6 +827,7 @@ struct SettingsView: View {
             .terminal,
             // Integrations
             .extensions,
+            .merMotion,
             // Info
             .about
         ]
