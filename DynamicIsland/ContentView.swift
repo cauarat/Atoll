@@ -1304,6 +1304,8 @@ struct ContentView: View {
                                 NotchClipboardView()
                             case .terminal:
                                 NotchTerminalView()
+                            case .notifications:
+                                NotificationsTabView()
                             case .extensionExperience:
                                 if let payload = currentExtensionTabPayload() {
                                     ExtensionNotchExperienceTabView(payload: payload)

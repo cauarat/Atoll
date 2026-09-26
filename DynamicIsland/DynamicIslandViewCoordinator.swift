@@ -37,6 +37,7 @@ enum SneakContentType: Equatable {
     case lockScreen
     case capsLock
     case extensionLiveActivity(bundleID: String, activityID: String)
+    case appNotification(source: String)
 }
 
 extension SneakContentType {
@@ -60,6 +61,8 @@ extension SneakContentType {
             return true
         case let (.extensionLiveActivity(lb, la), .extensionLiveActivity(rb, ra)):
             return lb == rb && la == ra
+        case let (.appNotification(ls), .appNotification(rs)):
+            return ls == rs
         default:
             return false
         }

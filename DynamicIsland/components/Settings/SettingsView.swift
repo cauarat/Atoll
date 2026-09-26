@@ -66,6 +66,7 @@ private enum SettingsTab: String, CaseIterable, Identifiable {
     case shortcuts
     case notes
     case terminal
+    case merMotion
     case about
 
     var id: String { rawValue }
@@ -81,6 +82,7 @@ private enum SettingsTab: String, CaseIterable, Identifiable {
              .downloads, .shortcuts:                                         return .utilities
         case .stats, .terminal:                                              return .developer
         case .extensions:                                                    return .integrations
+        case .merMotion:                                                     return .integrations
         case .about:                                                         return .info
         }
     }
@@ -107,6 +109,7 @@ private enum SettingsTab: String, CaseIterable, Identifiable {
         case .shortcuts: return String(localized: "Shortcuts")
         case .notes: return String(localized: "Notes")
         case .terminal: return String(localized: "Terminal")
+        case .merMotion: return String(localized: "MerMotion")
         case .about: return String(localized: "About")
         }
     }
@@ -133,6 +136,7 @@ private enum SettingsTab: String, CaseIterable, Identifiable {
         case .shortcuts: return "keyboard"
         case .notes: return "note.text"
         case .terminal: return "apple.terminal"
+        case .merMotion: return "bell.badge"
         case .about: return "info.circle"
         }
     }
@@ -159,6 +163,7 @@ private enum SettingsTab: String, CaseIterable, Identifiable {
         case .shortcuts: return .orange
         case .notes: return Color(red: 0.979, green: 0.716, blue: 0.153, opacity: 1.000)
         case .terminal: return Color(red: 0.2, green: 0.8, blue: 0.4)
+        case .merMotion: return .orange
         case .about: return .secondary
         }
     }
@@ -1101,6 +1106,10 @@ struct SettingsView: View {
         case .terminal:
             SettingsForm(tab: .terminal) {
                 TerminalSettings()
+            }
+        case .merMotion:
+            SettingsForm(tab: .merMotion) {
+                MerMotionSettingsView()
             }
         case .about:
             if let controller = updaterController {

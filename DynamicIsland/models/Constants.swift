@@ -1327,6 +1327,14 @@ extension Defaults.Keys {
     static let timerProgressStyle = Key<TimerProgressStyle>("timerProgressStyle", default: .bar)
     static let mirrorSystemTimer = Key<Bool>("mirrorSystemTimer", default: true)
     static let timerInputStyle = Key<TimerInputStyle>("timerInputStyle", default: .manual)
+
+    // MARK: MerMotion (App Notifications) Feature
+    static let enableMerMotion = Key<Bool>("enableMerMotion", default: false)
+    static let merMotionDuration = Key<Double>("merMotionDuration", default: 4.5)
+    static let enableMattermostNotifications = Key<Bool>("enableMattermostNotifications", default: true)
+    static let mattermostServerURL = Key<String>("mattermostServerURL", default: "")
+    static let mattermostUsername = Key<String>("mattermostUsername", default: "")
+    static let mattermostConnected = Key<Bool>("mattermostConnected", default: false)
     
     
     // MARK: Reminder Live Activity

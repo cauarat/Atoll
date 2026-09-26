@@ -95,6 +95,11 @@ struct TabSelectionView: View {
         if Defaults[.enableTerminalFeature] {
             tabsArray.append(TabModel(label: "Terminal", icon: "apple.terminal", view: .terminal))
         }
+
+        // Notifications tab (MerMotion)
+        if Defaults[.enableMerMotion] {
+            tabsArray.append(TabModel(label: "Notifications", icon: "bell.badge", view: .notifications))
+        }
         if extensionTabsEnabled {
             for payload in extensionTabPayloads {
                 guard let tab = payload.descriptor.tab else { continue }
