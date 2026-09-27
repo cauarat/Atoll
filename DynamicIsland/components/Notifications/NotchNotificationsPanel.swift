@@ -22,11 +22,27 @@ import AppKit
 /// been living in these 120pt: a 3pt accent bar, a `.callout` title, and
 /// `.caption` secondary text in `Color(white: 0.65)`.
 struct NotchNotificationsPanel: View {
+    @EnvironmentObject var vm: DynamicIslandViewModel
     @ObservedObject private var bridge = NotificationBridgeManager.shared
     @Default(.enableMerMotion) private var merMotionEnabled
 
     @State private var hoveredID: String?
     @State private var isHoveringHeader = false
+
+    /// Re-read whenever the notch opens.
+    ///
+    /// `AppNotification.timeAgo` measures against `Date()` at render time and
+    /// nothing republishes it, while this view stays mounted with the notch shut
+    /// -- it is only blurred. Without a reference that moves, a row that said
+    /// "2m" goes on saying "2m" an hour later. Kept local so the tab and the
+    /// peek, which are built fresh each time they appear, are untouched.
+    @State private var timeReference = Date.now
+
+    private static let relativeFormatter: RelativeDateTimeFormatter = {
+        let formatter = RelativeDateTimeFormatter()
+        formatter.unitsStyle = .abbreviated
+        return formatter
+    }()
 
     /// 120pt beside the music player, matching `CalendarView`'s cap — that cap
     /// is what keeps the notch window from growing. Standalone passes nil to
@@ -46,6 +62,11 @@ struct NotchNotificationsPanel: View {
         }
         .frame(height: fixedHeight)
         .animation(.smooth(duration: 0.3), value: bridge.notifications.count)
+        .onAppear { timeReference = .now }
+        .onChange(of: vm.notchState) { _, newState in
+            guard newState == .open else { return }
+            timeReference = .now
+        }
     }
 
     // MARK: - Header
@@ -168,10 +189,13 @@ struct NotchNotificationsPanel: View {
                     .buttonStyle(.plain)
                     .help("Dismiss")
                 } else {
-                    Text(notification.timeAgo)
-                        .font(.caption)
-                        .foregroundColor(Color(white: 0.65))
-                        .lineLimit(1)
+                    Text(Self.relativeFormatter.localizedString(
+                        for: notification.timestamp,
+                        relativeTo: timeReference
+                    ))
+                    .font(.caption)
+                    .foregroundColor(Color(white: 0.65))
+                    .lineLimit(1)
                 }
             }
             .frame(minWidth: 28, alignment: .trailing)
@@ -236,6 +260,7 @@ struct NotchNotificationsPanel: View {
 
 #Preview {
     NotchNotificationsPanel()
+        .environmentObject(DynamicIslandViewModel())
         .frame(width: 280)
         .padding()
         .background(Color.black)

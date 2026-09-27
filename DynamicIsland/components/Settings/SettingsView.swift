@@ -3433,8 +3433,8 @@ struct Media: View {
 
                 Text(
                     showCalendar
-                        ? "Lyrics sit on one line under the artist name, since the calendar is using the rest of the notch. Turn the calendar off to give them a full panel beside the player."
-                        : "Lyrics get their own panel beside the player. Turn the calendar on to move them under the artist name instead."
+                        ? "Lyrics sit on one line under the artist name, since the side panel is using the rest of the notch. Set the notch side panel to None to give them a full panel beside the player."
+                        : "Lyrics get their own panel beside the player. Turn a notch side panel on to move them under the artist name instead."
                 )
                 .font(.caption)
                 .foregroundStyle(.secondary)
@@ -3725,6 +3725,12 @@ struct CalendarSettings: View {
         }
     }
 
+    /// True only while the column is really rendering a calendar. The event and
+    /// calendar-selection settings below have no effect otherwise.
+    private var calendarPanelActive: Bool {
+        showCalendar && sidePanelContent == .calendar
+    }
+
     private var sidePanelChoice: Binding<SidePanelChoice> {
         Binding(
             get: {
@@ -3847,7 +3853,7 @@ struct CalendarSettings: View {
                 Section(header: Text("All-Day Events")) {
                     Toggle("Hide all-day events", isOn: $hideAllDayEvents)
                         .settingsHighlight(id: highlightID("Hide all-day events"))
-                        .disabled(!showCalendar)
+                        .disabled(!calendarPanelActive)
 
                     Text("Turn this off to include all-day entries in the notch calendar and reminder live activity.")
                         .font(.caption)
@@ -4124,7 +4130,7 @@ struct CalendarSettings: View {
                             .labelsHidden()
                             .toggleStyle(.switch)
                             .controlSize(.mini)
-                            .disabled(!showCalendar)
+                            .disabled(!calendarPanelActive)
                         }) {
                             ForEach(accountCalendars, id: \.id) { calendar in
                                 Toggle(isOn: Binding(
@@ -4142,7 +4148,7 @@ struct CalendarSettings: View {
                                         Text(calendar.title)
                                     }
                                 }
-                                .disabled(!showCalendar)
+                                .disabled(!calendarPanelActive)
                             }
                         }
                     }
