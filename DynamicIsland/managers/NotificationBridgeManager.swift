@@ -127,6 +127,8 @@ final class NotificationBridgeManager: ObservableObject {
         latestNotification = notification
         lastPresentedID = notification.id
 
+        MerMotionSound.play(for: notification.type)
+
         // The peek is one line, so the channel rides along with the sender and the
         // subtitle carries the message. Putting the channel in the subtitle instead
         // dropped the message entirely for anything posted in a channel.
@@ -153,8 +155,8 @@ final class NotificationBridgeManager: ObservableObject {
         let collapsed = body
             .replacingOccurrences(of: "\n", with: " ")
             .trimmingCharacters(in: .whitespacesAndNewlines)
-        guard collapsed.count > 280 else { return collapsed }
-        return collapsed.prefix(279) + "…"
+        guard collapsed.count > 200 else { return collapsed }
+        return collapsed.prefix(199) + "…"
     }
 
     // MARK: - Public Methods

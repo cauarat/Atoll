@@ -1351,6 +1351,19 @@ extension Defaults.Keys {
     static let mattermostServerURL = Key<String>("mattermostServerURL", default: "")
     static let mattermostUsername = Key<String>("mattermostUsername", default: "")
     static let mattermostConnected = Key<Bool>("mattermostConnected", default: false)
+
+    /// Channels that alert even without a mention, by internal or display name.
+    /// Empty -- the default -- means direct messages and mentions only, which is
+    /// what makes this usable in a busy workspace.
+    static let mattermostMonitoredChannels = Key<[String]>("mattermostMonitoredChannels", default: [])
+
+    // MerMotion sound. These are macOS system sounds loaded by name from
+    // /System/Library/Sounds, so nothing is bundled.
+    static let merMotionSoundEnabled = Key<Bool>("merMotionSoundEnabled", default: true)
+    static let merMotionVolume = Key<Double>("merMotionVolume", default: 0.8)
+    static let merMotionSoundDirectMessage = Key<String>("merMotionSoundDirectMessage", default: "Hero")
+    static let merMotionSoundMention = Key<String>("merMotionSoundMention", default: "Glass")
+    static let merMotionSoundChannel = Key<String>("merMotionSoundChannel", default: "Tink")
     
     
     // MARK: Reminder Live Activity
