@@ -199,6 +199,7 @@ final class NotificationBridgeManager: ObservableObject {
             sender: "Test User",
             senderAvatar: nil,
             channel: "general",
+            channelID: nil,
             body: "This is a test notification from MerMotion!",
             timestamp: Date(),
             source: "mattermost",

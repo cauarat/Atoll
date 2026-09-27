@@ -2,11 +2,21 @@ import SwiftUI
 import Defaults
 
 struct NotificationPeekView: View {
-    @EnvironmentObject var vm: DynamicIslandViewModel
     @ObservedObject private var coordinator = DynamicIslandViewCoordinator.shared
     @ObservedObject private var notificationBridge = NotificationBridgeManager.shared
 
     @Default(.enableMerMotion) private var merMotionEnabled
+
+    @State private var replyText = ""
+    @State private var sendState: SendState = .idle
+    @FocusState private var isReplyFocused: Bool
+
+    private enum SendState: Equatable {
+        case idle
+        case sending
+        case sent
+        case failed(String)
+    }
 
     var body: some View {
         if merMotionEnabled {
@@ -32,7 +42,7 @@ struct NotificationPeekView: View {
 
                 Text(latestNotification?.timeAgo ?? "")
                     .font(.system(size: 11))
-                    .foregroundColor(.secondary)
+                    .foregroundColor(Color(white: 0.65))
             }
             .padding(.horizontal, 12)
             .padding(.top, 10)
@@ -52,13 +62,13 @@ struct NotificationPeekView: View {
                     if let channel = notification.channel {
                         Text(channel)
                             .font(.system(size: 11))
-                            .foregroundColor(.secondary)
+                            .foregroundColor(Color(white: 0.65))
                             .lineLimit(1)
                     }
 
                     Text(notification.body)
                         .font(.system(size: 12))
-                        .foregroundColor(.secondary)
+                        .foregroundColor(Color(white: 0.65))
                         .lineLimit(2)
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
@@ -66,40 +76,16 @@ struct NotificationPeekView: View {
                 .padding(.vertical, 8)
             }
 
-            // Action buttons
-            HStack(spacing: 12) {
-                // Mark as read button
-                Button(action: {
-                    if let id = latestNotification?.id {
-                        notificationBridge.markAsRead(id)
-                        coordinator.toggleSneakPeek(status: false, type: coordinator.sneakPeek.type)
-                    }
-                }) {
-                    HStack(spacing: 4) {
-                        Image(systemName: "checkmark.circle")
-                            .font(.system(size: 11))
-                        Text("Dismiss")
-                            .font(.system(size: 11, weight: .medium))
-                    }
-                    .foregroundColor(.secondary)
-                    .padding(.horizontal, 10)
-                    .padding(.vertical, 5)
-                    .background(Color.secondary.opacity(0.15))
-                    .clipShape(Capsule())
+            // Reply bar: the field takes the width, Open sits hard right.
+            HStack(spacing: 10) {
+                if canReply {
+                    replyField
+                } else {
+                    Spacer(minLength: 0)
                 }
-                .buttonStyle(.plain)
 
-                // Open link button
                 if latestNotification?.link != nil {
-                    Button(action: {
-                        if let url = latestNotification?.link {
-                            NSWorkspace.shared.open(url)
-                            if let id = latestNotification?.id {
-                                notificationBridge.markAsRead(id)
-                            }
-                            coordinator.toggleSneakPeek(status: false, type: coordinator.sneakPeek.type)
-                        }
-                    }) {
+                    Button(action: openLink) {
                         HStack(spacing: 4) {
                             Image(systemName: "arrow.up.forward")
                                 .font(.system(size: 11))
@@ -107,27 +93,13 @@ struct NotificationPeekView: View {
                                 .font(.system(size: 11, weight: .medium))
                         }
                         .foregroundColor(.white)
-                        .padding(.horizontal, 10)
-                        .padding(.vertical, 5)
+                        .padding(.horizontal, 12)
+                        .padding(.vertical, 6)
                         .background(accentColor)
                         .clipShape(Capsule())
                     }
                     .buttonStyle(.plain)
                 }
-
-                Spacer()
-
-                // View all button
-                Button(action: {
-                    coordinator.toggleSneakPeek(status: false, type: coordinator.sneakPeek.type)
-                    coordinator.currentView = .notifications
-                    vm.open()
-                }) {
-                    Text("View All")
-                        .font(.system(size: 11, weight: .medium))
-                        .foregroundColor(accentColor)
-                }
-                .buttonStyle(.plain)
             }
             .padding(.horizontal, 12)
             .padding(.top, 6)
@@ -137,15 +109,112 @@ struct NotificationPeekView: View {
         .background(Color.black.opacity(0.85))
     }
 
+    private var replyField: some View {
+        HStack(spacing: 8) {
+            TextField(replyPlaceholder, text: $replyText)
+                .textFieldStyle(.plain)
+                .font(.system(size: 12))
+                .foregroundColor(.white)
+                .focused($isReplyFocused)
+                .disabled(sendState == .sending)
+                .onSubmit(send)
+
+            if case .sending = sendState {
+                ProgressView().controlSize(.small)
+            } else if case .sent = sendState {
+                Image(systemName: "checkmark")
+                    .font(.system(size: 11, weight: .semibold))
+                    .foregroundColor(.green)
+            } else if case .failed(let reason) = sendState {
+                Text(reason)
+                    .font(.system(size: 10))
+                    .foregroundColor(.orange)
+                    .lineLimit(1)
+            }
+        }
+        .padding(.horizontal, 10)
+        .padding(.vertical, 6)
+        .background(
+            Capsule()
+                .fill(Color.white.opacity(isReplyFocused ? 0.14 : 0.08))
+        )
+        .frame(maxWidth: .infinity)
+        // The peek hides on a timer that knows nothing about what the user is
+        // doing; without this it vanishes mid-sentence.
+        .onChange(of: isReplyFocused) { _, focused in
+            if focused {
+                coordinator.holdSneakPeek()
+            } else {
+                coordinator.releaseSneakPeek()
+            }
+        }
+        .onExitCommand { dismiss() }
+    }
+
+    private var replyPlaceholder: String {
+        guard let sender = latestNotification?.sender, !sender.isEmpty else {
+            return String(localized: "Reply…")
+        }
+        return String(localized: "Reply to \(sender)…")
+    }
+
+    private var canReply: Bool {
+        latestNotification?.source == "mattermost" && latestNotification?.channelID != nil
+    }
+
+    private func send() {
+        guard let notification = latestNotification,
+              let channelID = notification.channelID
+        else { return }
+
+        let text = replyText.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !text.isEmpty, sendState != .sending else { return }
+
+        sendState = .sending
+        Task { @MainActor in
+            do {
+                try await MattermostClient.shared.sendMessage(channelID: channelID, message: text)
+                replyText = ""
+                sendState = .sent
+                notificationBridge.markAsRead(notification.id)
+                try? await Task.sleep(for: .milliseconds(700))
+                dismiss()
+            } catch {
+                // The text stays in the field. Losing what someone typed because
+                // the network blinked is worse than the failure itself.
+                sendState = .failed(
+                    (error as? MattermostClient.ClientError)?.text
+                        ?? String(localized: "Could not send")
+                )
+            }
+        }
+    }
+
+    private func openLink() {
+        if let url = latestNotification?.link {
+            NSWorkspace.shared.open(url)
+        }
+        if let id = latestNotification?.id {
+            notificationBridge.markAsRead(id)
+        }
+        dismiss()
+    }
+
+    private func dismiss() {
+        isReplyFocused = false
+        coordinator.releaseSneakPeek(after: 0.1)
+        coordinator.toggleSneakPeek(status: false, type: coordinator.sneakPeek.type)
+    }
+
     private var disabledView: some View {
         VStack(spacing: 8) {
             Image(systemName: "bell.slash")
                 .font(.system(size: 24))
-                .foregroundColor(.secondary)
+                .foregroundColor(Color(white: 0.65))
 
             Text("MerMotion Disabled")
                 .font(.system(size: 13, weight: .medium))
-                .foregroundColor(.secondary)
+                .foregroundColor(Color(white: 0.65))
 
             Text("Enable in Settings")
                 .font(.system(size: 11))

@@ -388,6 +388,22 @@ class DynamicIslandViewCoordinator: ObservableObject {
     private var sneakPeekTask: Task<Void, Never>?
 
     // Helper function to manage sneakPeek timer using Swift Concurrency
+    /// Holds the current sneak peek open indefinitely.
+    ///
+    /// The peek hides on a timer with no regard for what the user is doing, which
+    /// is right for a HUD and wrong for a card with a reply field in it -- it
+    /// would vanish mid-sentence. Paired with `releaseSneakPeek()`.
+    func holdSneakPeek() {
+        sneakPeekTask?.cancel()
+        sneakPeekTask = nil
+    }
+
+    /// Re-arms the auto-hide after a `holdSneakPeek()`.
+    func releaseSneakPeek(after duration: TimeInterval? = nil) {
+        guard sneakPeek.show else { return }
+        scheduleSneakPeekHide(after: duration ?? sneakPeekDuration)
+    }
+
     private func scheduleSneakPeekHide(after duration: TimeInterval) {
         sneakPeekTask?.cancel()
         

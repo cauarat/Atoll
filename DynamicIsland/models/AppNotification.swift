@@ -8,6 +8,10 @@ struct AppNotification: Identifiable, Codable, Equatable {
     let sender: String
     let senderAvatar: String?
     let channel: String?
+    /// The channel's id, for replying. Optional because everything already in
+    /// `notifications.json` predates it -- a non-optional here would make the
+    /// decoder throw and drop the whole stored history on first launch.
+    let channelID: String?
     let body: String
     let timestamp: Date
     let source: String  // "mattermost", "slack", etc.

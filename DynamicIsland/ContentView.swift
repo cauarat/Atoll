@@ -636,6 +636,14 @@ struct ContentView: View {
                 )
             )
         }
+        if isFullCardNotificationVisible, !isDynamicIslandMode {
+            return AnyShape(
+                NotchShape(
+                    topCornerRadius: activeCornerRadiusInsets.closed.top,
+                    bottomCornerRadius: cornerRadiusInsets.opened.bottom
+                )
+            )
+        }
         if let activeClosedRecordingSurfaceShape {
             return activeClosedRecordingSurfaceShape
         }
@@ -718,6 +726,7 @@ struct ContentView: View {
                     .onTapGesture {
                         guard !isConnectivityHUDVisible else { return }
                         guard !recordingOpenGestureLocked else { return }
+                        guard !isFullCardNotificationVisible else { return }
                         if handleClosedMusicWaveformTapIfNeeded() {
                             return
                         }
@@ -1290,10 +1299,12 @@ struct ContentView: View {
                                       }
                                       .padding(.bottom, 10)
                                   case .fullCard:
+                                      // Fills the panel, which is already at
+                                      // openNotchSize -- the card was only narrow
+                                      // because fixedSize() shrink-wrapped it.
                                       NotificationPeekView()
-                                          .frame(minWidth: 280)
-                                          .clipShape(RoundedRectangle(cornerRadius: 10))
-                                          .padding(.horizontal, 4)
+                                          .frame(maxWidth: .infinity)
+                                          .padding(.horizontal, 8)
                                           .padding(.bottom, 10)
                                   }
                               }
@@ -2173,6 +2184,19 @@ struct ContentView: View {
             && !coordinator.firstLaunch
     }
 
+    /// A click inside the full-card notification belongs to the card -- its reply
+    /// field, its Open button -- not to opening the notch. Without this, clicking
+    /// into the reply field opens the notch and tears the card down, which makes
+    /// the field impossible to use at all.
+    private var isFullCardNotificationVisible: Bool {
+        guard isSneakPeekVisibleOnCurrentScreen,
+              coordinator.sneakPeek.type.isAppNotification,
+              Defaults[.merMotionPeekStyle] == .fullCard,
+              vm.notchState == .closed
+        else { return false }
+        return true
+    }
+
     private func handleClosedMusicWaveformTapIfNeeded() -> Bool {
         guard shouldShowClosedMusicWaveformPlayPauseOverlay(for: nil),
               isHoveringClosedMusicWaveformControl else {
@@ -2282,6 +2306,8 @@ struct ContentView: View {
                 guard !self.recordingOpenGestureLocked else { return }
                 guard !self.coordinator.isHoverOpenSuppressed else { return }
                 guard self.isHovering else { return }
+                // Same reason as the tap gesture: the click belongs to the card.
+                guard !self.isFullCardNotificationVisible else { return }
                 guard !self.handleClosedMusicWaveformTapIfNeeded() else { return }
                 if Defaults[.enableHaptics] {
                     self.triggerHapticIfAllowed()
@@ -3048,6 +3074,10 @@ struct ContentView: View {
         // `isOtherSneak`, which is true whenever the notch is closed, so fixedSize()
         // shrink-wrapped a row the branch had declined to draw.
         if case .appNotification = coordinator.sneakPeek.type {
+            // The full card is meant to fill the notch's width; fixedSize() would
+            // shrink it back to its ideal size, which is the whole bug. The
+            // compact row does want shrink-wrapping.
+            guard Defaults[.merMotionPeekStyle] != .fullCard else { return false }
             return vm.notchState == .closed && !vm.hideOnClosed && style == .standard
         }
         

@@ -447,6 +447,7 @@ final class MattermostClient: ObservableObject {
             sender: sender,
             senderAvatar: nil,
             channel: isDirect ? nil : payload.channel_display_name?.nilIfBlank,
+            channelID: post.channel_id,
             body: body,
             timestamp: Date(timeIntervalSince1970: TimeInterval(post.create_at) / 1000),
             source: "mattermost",
@@ -527,6 +528,53 @@ final class MattermostClient: ObservableObject {
             .appendingPathComponent(postID)
     }
 
+    /// Posts a reply into a channel. Used by the notification card, so the user
+    /// can answer without leaving what they were doing.
+    ///
+    /// A stored session lasts about a month, so it may well be stale by the time
+    /// someone replies -- a 401 logs in again and retries once rather than
+    /// handing back a failure the user can do nothing about.
+    func sendMessage(channelID: String, message: String) async throws {
+        let text = message.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !text.isEmpty else { return }
+        guard let base = baseURL ?? Self.normalizedBaseURL(Defaults[.mattermostServerURL]) else {
+            throw ClientError(String(localized: "No server configured"))
+        }
+
+        do {
+            try await post(base: base, token: MattermostTokenStore.shared.sessionToken, channelID: channelID, message: text)
+        } catch let error as ClientError where error.isUnauthorized {
+            let (token, _) = try await logIn(base: base)
+            try await post(base: base, token: token, channelID: channelID, message: text)
+        }
+    }
+
+    private func post(base: URL, token: String, channelID: String, message: String) async throws {
+        guard !token.isEmpty else { throw ClientError(String(localized: "Not signed in"), isUnauthorized: true) }
+
+        var request = URLRequest(url: base.appendingPathComponent("api/v4/posts"))
+        request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+        request.httpBody = try JSONSerialization.data(withJSONObject: [
+            "channel_id": channelID,
+            "message": message
+        ])
+
+        let (_, response) = try await session.data(for: request)
+        guard let http = response as? HTTPURLResponse else {
+            throw ClientError(String(localized: "Unexpected response from server"))
+        }
+        switch http.statusCode {
+        case 200, 201:
+            return
+        case 401, 403:
+            throw ClientError(String(localized: "Session expired"), isUnauthorized: true)
+        default:
+            throw ClientError(String(localized: "Server returned \(http.statusCode)"))
+        }
+    }
+
     private func loadTeams(base: URL, token: String) async {
         var request = URLRequest(url: base.appendingPathComponent("api/v4/users/me/teams"))
         request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
@@ -585,9 +633,16 @@ final class MattermostClient: ObservableObject {
 
     // MARK: - Errors
 
-    private struct ClientError: Error {
+    struct ClientError: Error, LocalizedError {
         let text: String
-        init(_ text: String) { self.text = text }
+        let isUnauthorized: Bool
+
+        init(_ text: String, isUnauthorized: Bool = false) {
+            self.text = text
+            self.isUnauthorized = isUnauthorized
+        }
+
+        var errorDescription: String? { text }
     }
 }
 
@@ -629,6 +684,7 @@ struct WirePost: Decodable {
     let id: String
     let message: String
     let user_id: String
+    let channel_id: String?
     /// Milliseconds since the epoch, not seconds.
     let create_at: Int
     /// "" for a user post, "system_*" for joins and leaves.
