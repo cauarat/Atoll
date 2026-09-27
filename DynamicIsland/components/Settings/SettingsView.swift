@@ -336,7 +336,7 @@ private enum SettingsSearchIndex {
         SettingsSearchEntry(tab: .media, title: "Enable album art parallax effect", keywords: ["parallax", "parallax effect", "album art"], highlightID: SettingsTab.media.highlightID(for: "Enable album art parallax effect")),
 
         // Calendar
-        SettingsSearchEntry(tab: .calendar, title: "Show calendar", keywords: ["calendar", "events"], highlightID: SettingsTab.calendar.highlightID(for: "Show calendar")),
+        SettingsSearchEntry(tab: .calendar, title: "Notch side panel", keywords: ["calendar", "events", "notifications", "side panel"], highlightID: SettingsTab.calendar.highlightID(for: "Notch side panel")),
         SettingsSearchEntry(tab: .calendar, title: "Enable reminder live activity", keywords: ["reminder", "live activity"], highlightID: SettingsTab.calendar.highlightID(for: "Enable reminder live activity")),
         SettingsSearchEntry(tab: .calendar, title: "Countdown style", keywords: ["reminder countdown"], highlightID: SettingsTab.calendar.highlightID(for: "Countdown style")),
         SettingsSearchEntry(tab: .calendar, title: "Show lock screen reminder", keywords: ["lock screen", "reminder widget"], highlightID: SettingsTab.calendar.highlightID(for: "Show lock screen reminder")),
@@ -3681,6 +3681,7 @@ struct Media: View {
 struct CalendarSettings: View {
     @ObservedObject private var calendarManager = CalendarManager.shared
     @Default(.showCalendar) var showCalendar: Bool
+    @Default(.notchSidePanelContent) var sidePanelContent: NotchSidePanelContent
     @Default(.enableLyrics) private var enableLyrics
     @Default(.enableReminderLiveActivity) var enableReminderLiveActivity
     @Default(.reminderPresentationStyle) var reminderPresentationStyle
@@ -3705,6 +3706,45 @@ struct CalendarSettings: View {
     @Default(.enableThirdPartyCalendarApp) private var enableThirdPartyCalendarApp
     @Default(.selectedCalendarApp) private var selectedCalendarApp
     @Default(.fantasticalDefaultView) private var fantasticalDefaultView
+
+    /// Named `hidden` rather than `none` so it cannot be read as `Optional.none`
+    /// at a call site.
+    enum SidePanelChoice: String, CaseIterable, Identifiable {
+        case notifications
+        case calendar
+        case hidden
+
+        var id: String { self.rawValue }
+
+        var label: LocalizedStringKey {
+            switch self {
+            case .notifications: return "Notifications"
+            case .calendar: return "Calendar"
+            case .hidden: return "None"
+            }
+        }
+    }
+
+    private var sidePanelChoice: Binding<SidePanelChoice> {
+        Binding(
+            get: {
+                guard showCalendar else { return .hidden }
+                return sidePanelContent == .notifications ? .notifications : .calendar
+            },
+            set: { choice in
+                switch choice {
+                case .hidden:
+                    showCalendar = false
+                case .notifications:
+                    sidePanelContent = .notifications
+                    showCalendar = true
+                case .calendar:
+                    sidePanelContent = .calendar
+                    showCalendar = true
+                }
+            }
+        )
+    }
 
     private func highlightID(_ title: String) -> String {
         SettingsTab.calendar.highlightID(for: title)
@@ -3776,11 +3816,19 @@ struct CalendarSettings: View {
                     }
                 }
 
-                Defaults.Toggle(key: .showCalendar) {
-                    Text("Show calendar")
+                Picker("Notch side panel", selection: sidePanelChoice) {
+                    ForEach(SidePanelChoice.allCases) { choice in
+                        Text(choice.label).tag(choice)
+                    }
                 }
-                .settingsHighlight(id: highlightID("Show calendar"))
-                if enableLyrics {
+                .settingsHighlight(id: highlightID("Notch side panel"))
+
+                Text("What fills the column beside the music player when the notch is open.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+
+                if showCalendar && enableLyrics {
                     Text("Lyrics are on too, so the two share the notch and lyrics drop to a single line under the artist name.")
                         .font(.caption)
                         .foregroundStyle(.secondary)

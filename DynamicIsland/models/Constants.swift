@@ -471,6 +471,25 @@ enum MediaControllerType: String, CaseIterable, Identifiable, Defaults.Serializa
     }
 }
 
+/// What fills the column to the right of the music player in the open notch.
+///
+/// Whether the column exists at all stays with `showCalendar`, which also drives
+/// notch width, Home-tab visibility and the inline-vs-side lyrics decision. This
+/// only picks the content, so none of that has to move.
+enum NotchSidePanelContent: String, CaseIterable, Identifiable, Defaults.Serializable {
+    case notifications = "Notifications"
+    case calendar = "Calendar"
+
+    var id: String { self.rawValue }
+
+    var localizedName: String {
+        switch self {
+        case .notifications: return String(localized: "Notifications")
+        case .calendar: return String(localized: "Calendar")
+        }
+    }
+}
+
 // Sneak peek styles for selection in settings
 enum SneakPeekStyle: String, CaseIterable, Identifiable, Defaults.Serializable {
     case standard = "Default"
@@ -1049,6 +1068,7 @@ extension Defaults.Keys {
     static let animationTransformOverrides = Key<[String: AnimationTransformConfig]>("animationTransformOverrides", default: [:])
     static let tileShowLabels = Key<Bool>("tileShowLabels", default: false)
     static let showCalendar = Key<Bool>("showCalendar", default: true)
+    static let notchSidePanelContent = Key<NotchSidePanelContent>("notchSidePanelContent", default: .notifications)
     static let hideCompletedReminders = Key<Bool>("hideCompletedReminders", default: true)
     static let hideAllDayEvents = Key<Bool>("hideAllDayEvents", default: false)
     static let sliderColor = Key<SliderColorEnum>(

@@ -897,6 +897,7 @@ struct NotchHomeView: View {
     @Default(.showStandardMediaControls) private var showStandardMediaControls
     @Default(.autoHideInactiveNotchMediaPlayer) private var autoHideInactiveNotchMediaPlayer
     @Default(.showCalendar) private var showCalendar
+    @Default(.notchSidePanelContent) private var sidePanelContent
     @Default(.enableLyrics) private var enableLyrics
     @Default(.lyricsPanelWidth) private var lyricsPanelWidth
     @Default(.lyricsPanelOffset) private var lyricsPanelOffset
@@ -965,10 +966,20 @@ struct NotchHomeView: View {
 
                     if showCalendar && showCalendarDeferred {
                         Group {
-                            if shouldShowMusicPlayer {
-                                CalendarView()
-                            } else {
-                                StandaloneCalendarView()
+                            switch sidePanelContent {
+                            case .notifications:
+                                // nil height when the player is hidden: the column
+                                // has the whole panel to itself, as the calendar's
+                                // standalone variant does.
+                                NotchNotificationsPanel(
+                                    fixedHeight: shouldShowMusicPlayer ? 120 : nil
+                                )
+                            case .calendar:
+                                if shouldShowMusicPlayer {
+                                    CalendarView()
+                                } else {
+                                    StandaloneCalendarView()
+                                }
                             }
                         }
                         .frame(maxWidth: .infinity, alignment: .leading)
