@@ -5,12 +5,14 @@ import Combine
 struct MerMotionSettingsView: View {
     @ObservedObject private var notificationBridge = NotificationBridgeManager.shared
     @ObservedObject private var mattermost = MattermostClient.shared
+    @ObservedObject private var clickMassa = ClickMassaClient.shared
 
     @Default(.enableMerMotion) private var merMotionEnabled
     @Default(.merMotionDuration) private var merMotionDuration
     @Default(.merMotionPeekStyle) private var merMotionPeekStyle
     @Default(.enableMattermostNotifications) private var mattermostEnabled
     @Default(.enableClickMassaNotifications) private var clickMassaEnabled
+    @Default(.clickMassaServerURL) private var clickMassaServerURL
     @Default(.mattermostServerURL) private var mattermostServerURL
     @Default(.mattermostMonitoredChannels) private var monitoredChannels
 
@@ -23,6 +25,8 @@ struct MerMotionSettingsView: View {
     @State private var loginInput: String = MattermostTokenStore.shared.loginID
     @State private var passwordInput: String = ""
     @State private var newChannel: String = ""
+    @State private var clickMassaEmail: String = ClickMassaTokenStore.shared.email
+    @State private var clickMassaPassword: String = ""
     @State private var testNotificationSent = false
 
     var body: some View {
@@ -226,11 +230,6 @@ struct MerMotionSettingsView: View {
         }
     }
 
-    /// ClickMassa is half-built on purpose: the display path is done and
-    /// testable, but the platform is closed SaaS and its API calls have not been
-    /// identified yet, so there is nothing honest to put behind a Connect
-    /// button. The toggle and the test below exercise everything except the
-    /// network.
     private var clickMassaIntegrationSection: some View {
         VStack(alignment: .leading, spacing: 12) {
             HStack {
@@ -245,10 +244,10 @@ struct MerMotionSettingsView: View {
 
                     HStack(spacing: 4) {
                         Circle()
-                            .fill(Color.gray)
+                            .fill(clickMassaStatusColor)
                             .frame(width: 6, height: 6)
 
-                        Text("Not connected")
+                        Text(clickMassaStatusText)
                             .font(.system(size: 11))
                             .foregroundColor(.secondary)
                     }
@@ -262,19 +261,94 @@ struct MerMotionSettingsView: View {
             }
 
             if clickMassaEnabled {
-                VStack(alignment: .leading, spacing: 8) {
-                    Text("Receiving messages from ClickMassa still needs its API calls identified — it is a closed platform with no public documentation. The notch side is already done: the button below shows what a ClickMassa message will look like.")
+                VStack(alignment: .leading, spacing: 10) {
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text("Panel URL")
+                            .font(.system(size: 12, weight: .medium))
+                            .foregroundColor(.secondary)
+
+                        TextField("https://enterprise-000.clickmassa.com.br", text: $clickMassaServerURL)
+                            .textFieldStyle(.roundedBorder)
+                            .font(.system(size: 13))
+                            .disabled(clickMassa.state.isConnected)
+
+                        Text("The address you open in the browser. The API is found from it automatically.")
+                            .font(.system(size: 11))
+                            .foregroundColor(.secondary)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text("Email")
+                            .font(.system(size: 12, weight: .medium))
+                            .foregroundColor(.secondary)
+
+                        TextField("you@company.com", text: $clickMassaEmail)
+                            .textFieldStyle(.roundedBorder)
+                            .font(.system(size: 13))
+                            .disabled(clickMassa.state.isConnected)
+                    }
+
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text("Password")
+                            .font(.system(size: 12, weight: .medium))
+                            .foregroundColor(.secondary)
+
+                        SecureField("Your ClickMassa password", text: $clickMassaPassword)
+                            .textFieldStyle(.roundedBorder)
+                            .font(.system(size: 13))
+                            .disabled(clickMassa.state.isConnected)
+
+                        Text("Kept in your macOS Keychain. A ClickMassa session lasts about eight hours, so Atoll signs in again on its own.")
+                            .font(.system(size: 11))
+                            .foregroundColor(.secondary)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+
+                    HStack(spacing: 10) {
+                        if clickMassa.state.isConnected {
+                            Button("Sign Out") {
+                                clickMassa.signOut()
+                                clickMassaPassword = ""
+                            }
+                            .buttonStyle(.bordered)
+                        } else {
+                            Button(clickMassa.state == .connecting ? "Signing in…" : "Sign In") {
+                                ClickMassaTokenStore.shared.setCredentials(
+                                    email: clickMassaEmail,
+                                    password: clickMassaPassword
+                                )
+                                ClickMassaTokenStore.shared.setSessionToken("")
+                                clickMassa.connect()
+                            }
+                            .buttonStyle(.borderedProminent)
+                            .disabled(
+                                clickMassa.state == .connecting
+                                || clickMassaServerURL.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                                || clickMassaEmail.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                                || clickMassaPassword.isEmpty
+                            )
+                        }
+
+                        if clickMassa.state == .connecting {
+                            ProgressView().controlSize(.small)
+                        }
+
+                        Spacer()
+
+                        Button {
+                            notificationBridge.addTestNotification(source: .clickMassa)
+                        } label: {
+                            Text("Preview")
+                                .font(.system(size: 12))
+                        }
+                        .buttonStyle(.bordered)
+                    }
+
+                    Text("Only conversations assigned to you, and new ones waiting in your queues, open the notch — the server streams every ticket in the company.")
                         .font(.system(size: 11))
                         .foregroundColor(.secondary)
                         .fixedSize(horizontal: false, vertical: true)
-
-                    Button {
-                        notificationBridge.addTestNotification(source: .clickMassa)
-                    } label: {
-                        Text("Preview a ClickMassa notification")
-                            .font(.system(size: 12))
-                    }
-                    .buttonStyle(.bordered)
                 }
                 .padding(.top, 2)
             }
@@ -282,6 +356,24 @@ struct MerMotionSettingsView: View {
         .padding(12)
         .background(Color(NSColor.controlBackgroundColor))
         .clipShape(RoundedRectangle(cornerRadius: 10))
+    }
+
+    private var clickMassaStatusColor: Color {
+        switch clickMassa.state {
+        case .connected: return .green
+        case .connecting: return .yellow
+        case .failed: return .red
+        case .disconnected: return .gray
+        }
+    }
+
+    private var clickMassaStatusText: String {
+        switch clickMassa.state {
+        case .connected(let username): return String(localized: "Connected as \(username)")
+        case .connecting: return String(localized: "Connecting…")
+        case .failed(let reason): return reason
+        case .disconnected: return String(localized: "Not connected")
+        }
     }
 
     private var mattermostIntegrationSection: some View {

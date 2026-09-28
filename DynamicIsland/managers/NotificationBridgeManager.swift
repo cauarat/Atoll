@@ -76,6 +76,7 @@ final class NotificationBridgeManager: ObservableObject {
     func stop() {
         cancellables.removeAll()
         MattermostClient.shared.disconnect()
+        ClickMassaClient.shared.disconnect()
         hasStarted = false
     }
 
@@ -86,6 +87,12 @@ final class NotificationBridgeManager: ObservableObject {
             MattermostClient.shared.connectIfConfigured()
         } else {
             MattermostClient.shared.disconnect()
+        }
+
+        if Defaults[.enableMerMotion] && Defaults[.enableClickMassaNotifications] {
+            ClickMassaClient.shared.connectIfConfigured()
+        } else {
+            ClickMassaClient.shared.disconnect()
         }
     }
 
