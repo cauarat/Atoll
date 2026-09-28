@@ -30,9 +30,11 @@ struct NotificationPeekView: View {
         VStack(spacing: 0) {
             // Header with app icon and name
             HStack(spacing: 8) {
-                Image(systemName: iconForSource)
-                    .font(.system(size: 14, weight: .semibold))
-                    .foregroundColor(accentColor)
+                NotificationSourceIcon(
+                    source: latestNotification?.source,
+                    size: 14,
+                    symbolTint: accentColor
+                )
 
                 Text(sourceName)
                     .font(.system(size: 13, weight: .semibold))
@@ -164,9 +166,7 @@ struct NotificationPeekView: View {
     }
 
     private func send() {
-        guard let notification = latestNotification,
-              let channelID = notification.channelID
-        else { return }
+        guard let notification = latestNotification else { return }
 
         let text = replyText.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !text.isEmpty, sendState != .sending else { return }
@@ -174,19 +174,19 @@ struct NotificationPeekView: View {
         sendState = .sending
         Task { @MainActor in
             do {
-                try await MattermostClient.shared.sendMessage(channelID: channelID, message: text)
+                try await notificationBridge.reply(to: notification, text: text)
                 replyText = ""
                 sendState = .sent
-                notificationBridge.markAsRead(notification.id)
                 try? await Task.sleep(for: .milliseconds(700))
                 dismiss()
             } catch {
                 // The text stays in the field. Losing what someone typed because
                 // the network blinked is worse than the failure itself.
-                sendState = .failed(
-                    (error as? MattermostClient.ClientError)?.text
-                        ?? String(localized: "Could not send")
-                )
+                //
+                // Every client's error is a LocalizedError, so this carries the
+                // real reason. Casting to one client's type, as this did, would
+                // have swallowed the other's and said "Could not send".
+                sendState = .failed(error.localizedDescription)
             }
         }
     }
@@ -230,10 +230,6 @@ struct NotificationPeekView: View {
 
     private var sourceName: String {
         NotificationSource.displayName(for: latestNotification?.source)
-    }
-
-    private var iconForSource: String {
-        NotificationSource.iconName(for: latestNotification?.source)
     }
 
     private var accentColor: Color {

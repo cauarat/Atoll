@@ -38,12 +38,6 @@ struct NotchNotificationsPanel: View {
     /// peek, which are built fresh each time they appear, are untouched.
     @State private var timeReference = Date.now
 
-    private static let relativeFormatter: RelativeDateTimeFormatter = {
-        let formatter = RelativeDateTimeFormatter()
-        formatter.unitsStyle = .abbreviated
-        return formatter
-    }()
-
     /// 120pt beside the music player, matching `CalendarView`'s cap — that cap
     /// is what keeps the notch window from growing. Standalone passes nil to
     /// fill instead.
@@ -189,10 +183,7 @@ struct NotchNotificationsPanel: View {
                     .buttonStyle(.plain)
                     .help("Dismiss")
                 } else {
-                    Text(Self.relativeFormatter.localizedString(
-                        for: notification.timestamp,
-                        relativeTo: timeReference
-                    ))
+                    Text(notification.timeAgo(relativeTo: timeReference))
                     .font(.caption)
                     .foregroundColor(Color(white: 0.65))
                     .lineLimit(1)

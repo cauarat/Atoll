@@ -545,6 +545,94 @@ final class ClickMassaClient: ObservableObject {
         }
     }
 
+    // MARK: - Sending
+
+    /// Replies to a ticket from the notification card.
+    ///
+    /// The route is the second inference in this client, from the same family
+    /// of platform as the login: a reply is posted to `/messages/{ticketId}`.
+    /// A 404 says exactly that rather than leaving someone wondering why their
+    /// message went nowhere.
+    ///
+    /// Nothing comes back as a notification: the reply returns on the socket as
+    /// a `chat:create` with `fromMe: true`, which ``shouldNotify(payload:)``
+    /// drops on its first line.
+    func sendMessage(ticketID: String, message: String) async throws {
+        let text = message.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !text.isEmpty else { return }
+        guard let app = appURL ?? Self.normalizedAppURL(Defaults[.clickMassaServerURL]) else {
+            throw ClientError(String(localized: "No ClickMassa server configured"))
+        }
+
+        do {
+            try await post(
+                app: app,
+                token: ClickMassaTokenStore.shared.sessionToken,
+                ticketID: ticketID,
+                text: text
+            )
+        } catch let error as ClientError where error.isUnauthorized {
+            // A session lasts about eight hours, so it can expire between the
+            // notification arriving and the reply being typed.
+            invalidateSession()
+            // Someone is waiting on this one with a card open, so it does not
+            // queue behind the reconnect loop's sign-in floor.
+            bypassLoginFloorOnce = true
+            let account = try await obtainSession(app: app)
+            try await post(app: app, token: account.token, ticketID: ticketID, text: text)
+        }
+    }
+
+    private func post(app: URL, token: String, ticketID: String, text: String) async throws {
+        guard !token.isEmpty else {
+            throw ClientError(String(localized: "Not signed in to ClickMassa"), isUnauthorized: true)
+        }
+        guard let api = Self.apiURL(forApp: app) else {
+            throw ClientError(String(localized: "Could not derive the API address from that URL"))
+        }
+
+        var request = URLRequest(
+            url: api.appendingPathComponent("messages").appendingPathComponent(ticketID)
+        )
+        request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.setValue("application/json", forHTTPHeaderField: "Accept")
+        request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+        request.setValue(Self.userAgent, forHTTPHeaderField: "User-Agent")
+        request.setValue(app.absoluteString, forHTTPHeaderField: "Origin")
+        request.setValue(app.absoluteString + "/", forHTTPHeaderField: "Referer")
+        request.httpBody = try JSONSerialization.data(withJSONObject: Self.sendBody(text: text))
+
+        let (_, response) = try await session.data(for: request)
+        guard let http = response as? HTTPURLResponse else {
+            throw ClientError(String(localized: "Unexpected response from server"))
+        }
+
+        switch http.statusCode {
+        case 200, 201, 204:
+            return
+        case 401, 403:
+            throw ClientError(String(localized: "Session expired"), isUnauthorized: true)
+        case 404:
+            throw ClientError(String(localized: "No route at /messages/\(ticketID) — sending may live elsewhere on this server"))
+        case 429:
+            let delay = Self.retryDelay(
+                retryAfter: http.value(forHTTPHeaderField: "Retry-After"),
+                rateLimitReset: http.value(forHTTPHeaderField: "X-RateLimit-Reset")
+            )
+            throw ClientError(Self.rateLimitMessage(retryAfter: delay), retryAfter: delay)
+        default:
+            throw ClientError(String(localized: "Server returned \(http.statusCode)"))
+        }
+    }
+
+    /// The reply payload. `fromMe` is what puts the message on the company's
+    /// side of the conversation -- without it the panel would show your own
+    /// reply as if the customer had written it.
+    nonisolated static func sendBody(text: String) -> [String: Any] {
+        ["body": text, "fromMe": true, "read": true]
+    }
+
     // MARK: - Rate limiting
 
     /// How long to wait, from whichever header the server chose to send.
@@ -658,10 +746,13 @@ final class ClickMassaClient: ObservableObject {
         /// Set when the server said how long to wait, so the client can sit the
         /// wait out instead of handing the problem back to a person.
         let retryAfter: TimeInterval?
+        /// The session was refused, so signing in again is worth one attempt.
+        let isUnauthorized: Bool
 
-        init(_ text: String, retryAfter: TimeInterval? = nil) {
+        init(_ text: String, retryAfter: TimeInterval? = nil, isUnauthorized: Bool = false) {
             self.text = text
             self.retryAfter = retryAfter
+            self.isUnauthorized = isUnauthorized
         }
 
         var errorDescription: String? { text }

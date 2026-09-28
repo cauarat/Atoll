@@ -17,6 +17,68 @@ import XCTest
 /// ticket in the company -- so it is worth pinning down, and it is pure.
 final class ClickMassaClientTests: XCTestCase {
 
+    // MARK: - Replying
+
+    func testReplyIsMarkedAsComingFromTheCompany() {
+        // Without fromMe the panel would file your own reply under the
+        // customer, and the socket would hand it straight back as a new
+        // notification.
+        let body = ClickMassaClient.sendBody(text: "Bom dia")
+        XCTAssertEqual(body["body"] as? String, "Bom dia")
+        XCTAssertEqual(body["fromMe"] as? Bool, true)
+        XCTAssertEqual(body["read"] as? Bool, true)
+    }
+
+    func testClickMassaOffersAReplyBox() {
+        // The card decides through here, so this is the switch that turns the
+        // text field on.
+        XCTAssertTrue(NotificationSource.supportsReply("clickmassa"))
+        XCTAssertTrue(NotificationSource.supportsReply("mattermost"))
+        XCTAssertFalse(NotificationSource.supportsReply("slack"))
+        XCTAssertFalse(NotificationSource.supportsReply(nil))
+    }
+
+    func testEachSourceCarriesItsOwnMark() {
+        // Two cards that differ only in a word of text read as the same card.
+        XCTAssertEqual(NotificationSource.logoAsset(for: "mattermost"), "MattermostLogo")
+        XCTAssertEqual(NotificationSource.logoAsset(for: "clickmassa"), "ClickMassaLogo")
+        XCTAssertNil(NotificationSource.logoAsset(for: "slack"))
+        // Mattermost's is a silhouette to tint; ClickMassa's brings its cyan.
+        XCTAssertTrue(NotificationSource.logoIsTemplate(for: "mattermost"))
+        XCTAssertFalse(NotificationSource.logoIsTemplate(for: "clickmassa"))
+    }
+
+    // MARK: - Timestamps
+
+    func testAMessageThatJustArrivedReadsAsNow() {
+        // A server clock milliseconds ahead of ours had the card saying "in 0s".
+        let now = Date()
+        let notification = Self.notification(at: now.addingTimeInterval(0.4))
+        XCTAssertEqual(notification.timeAgo(relativeTo: now), "now")
+        XCTAssertEqual(Self.notification(at: now.addingTimeInterval(-12)).timeAgo(relativeTo: now), "now")
+    }
+
+    func testOlderMessagesStillCountUp() {
+        let now = Date()
+        XCTAssertNotEqual(Self.notification(at: now.addingTimeInterval(-3600)).timeAgo(relativeTo: now), "now")
+    }
+
+    private static func notification(at timestamp: Date) -> AppNotification {
+        AppNotification(
+            id: UUID().uuidString,
+            type: .directMessage,
+            sender: "Cliente",
+            senderAvatar: nil,
+            channel: nil,
+            channelID: "1586555",
+            body: "Oi",
+            timestamp: timestamp,
+            source: NotificationSource.clickMassa.rawValue,
+            link: nil,
+            isRead: false
+        )
+    }
+
     // MARK: - Rate limiting
 
     // 429 is what the server said when the client was signing in on every socket

@@ -43,9 +43,23 @@ struct AppNotification: Identifiable, Codable, Equatable {
         }
     }
 
-    var timeAgo: String {
+    var timeAgo: String { timeAgo(relativeTo: Date()) }
+
+    /// How long ago this arrived, measured against a reference the caller owns.
+    ///
+    /// The card was reading "in 0s" for a message that had just landed: a chat
+    /// server whose clock is milliseconds ahead of the Mac's stamps the message
+    /// in the future, and the formatter reports that faithfully. Anything
+    /// inside a minute, on either side of now, is simply now.
+    func timeAgo(relativeTo reference: Date) -> String {
+        let elapsed = reference.timeIntervalSince(timestamp)
+        guard elapsed >= 60 else { return String(localized: "now") }
+        return Self.relativeFormatter.localizedString(for: timestamp, relativeTo: reference)
+    }
+
+    private static let relativeFormatter: RelativeDateTimeFormatter = {
         let formatter = RelativeDateTimeFormatter()
         formatter.unitsStyle = .abbreviated
-        return formatter.localizedString(for: timestamp, relativeTo: Date())
-    }
+        return formatter
+    }()
 }

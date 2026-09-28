@@ -130,6 +130,51 @@ final class NotificationBridgeManager: ObservableObject {
         showNotificationPopup(latest)
     }
 
+    // MARK: - Replying
+
+    /// Sends a reply to the conversation a notification came from.
+    ///
+    /// The card knows "reply to this"; which client that means is this type's
+    /// business. Left in the view, the second source would have made a fifth
+    /// `switch` on the source string -- the thing ``NotificationSource`` exists
+    /// to stop.
+    func reply(to notification: AppNotification, text: String) async throws {
+        guard let conversationID = notification.channelID else {
+            throw ReplyError.noConversation
+        }
+
+        switch NotificationSource.from(notification.source) {
+        case .mattermost:
+            try await MattermostClient.shared.sendMessage(
+                channelID: conversationID,
+                message: text
+            )
+        case .clickMassa:
+            try await ClickMassaClient.shared.sendMessage(
+                ticketID: conversationID,
+                message: text
+            )
+        case .slack, .discord, .none:
+            throw ReplyError.unsupported(NotificationSource.displayName(for: notification.source))
+        }
+
+        markAsRead(notification.id)
+    }
+
+    enum ReplyError: LocalizedError {
+        case noConversation
+        case unsupported(String)
+
+        var errorDescription: String? {
+            switch self {
+            case .noConversation:
+                return String(localized: "Nothing to reply to")
+            case .unsupported(let name):
+                return String(localized: "Cannot reply on \(name)")
+            }
+        }
+    }
+
     // MARK: - Presentation
 
     private func showNotificationPopup(_ notification: AppNotification) {

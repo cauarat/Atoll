@@ -49,9 +49,31 @@ enum NotificationSource: String, CaseIterable, Identifiable {
 
     /// Whether the notification card may offer a reply box.
     ///
-    /// Replying needs a send endpoint and a conversation id, which only
-    /// Mattermost has so far.
+    /// Replying needs a send endpoint and a conversation id. Slack and Discord
+    /// have neither here yet.
     var supportsReply: Bool {
+        switch self {
+        case .mattermost, .clickMassa: return true
+        case .slack, .discord: return false
+        }
+    }
+
+    /// The brand mark in the asset catalog, when there is one.
+    ///
+    /// The SF Symbol stays as the fallback: a source with no logo is still
+    /// worth showing, and inventing a mark for one would be worse than a glyph.
+    var logoAsset: String? {
+        switch self {
+        case .mattermost: return "MattermostLogo"
+        case .clickMassa: return "ClickMassaLogo"
+        case .slack, .discord: return nil
+        }
+    }
+
+    /// Whether the mark is a single-colour silhouette to be tinted, or artwork
+    /// with its own colours. Mattermost's mark is drawn white on dark, the way
+    /// Mattermost draws it; ClickMassa's carries its own cyan.
+    var logoIsTemplate: Bool {
         switch self {
         case .mattermost: return true
         case .clickMassa, .slack, .discord: return false
@@ -85,6 +107,14 @@ enum NotificationSource: String, CaseIterable, Identifiable {
 
     static func supportsReply(_ source: String?) -> Bool {
         from(source)?.supportsReply ?? false
+    }
+
+    static func logoAsset(for source: String?) -> String? {
+        from(source)?.logoAsset
+    }
+
+    static func logoIsTemplate(for source: String?) -> Bool {
+        from(source)?.logoIsTemplate ?? false
     }
 
     /// An unknown source is not gated -- nothing can deliver one, and silently

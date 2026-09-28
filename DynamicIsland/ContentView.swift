@@ -1278,12 +1278,14 @@ struct ContentView: View {
                                   case .compact:
                                       GeometryReader { geo in
                                           HStack(spacing: 6) {
-                                              Image(systemName: coordinator.sneakPeek.icon.isEmpty
-                                                    ? appNotificationSneakPeekIcon(for: source)
-                                                    : coordinator.sneakPeek.icon)
-                                                  .font(.system(size: 11, weight: .semibold))
-                                                  .foregroundStyle(accent)
-                                                  .frame(width: 12, height: 12)
+                                              // The brand mark, so the compact
+                                              // peek says which app before the
+                                              // marquee gets to the sender.
+                                              NotificationSourceIcon(
+                                                  source: source,
+                                                  size: 12,
+                                                  symbolTint: accent
+                                              )
                                               MarqueeText(
                                                   .constant(
                                                       appNotificationSneakPeekText(
@@ -1425,10 +1427,6 @@ struct ContentView: View {
         guard !sender.isEmpty else { return detail }
         guard !detail.isEmpty else { return sender }
         return "\(sender) • \(detail)"
-    }
-
-    private func appNotificationSneakPeekIcon(for source: String) -> String {
-        NotificationSource.iconName(for: source)
     }
 
     private let reminderTimeFormatter: DateFormatter = {
