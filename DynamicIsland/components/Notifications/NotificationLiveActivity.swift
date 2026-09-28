@@ -108,13 +108,7 @@ struct NotificationLiveActivity: View {
     }
 
     private var iconForSource: String {
-        guard let source = latestNotification?.source else { return "bell.fill" }
-        switch source {
-        case "mattermost": return "bubble.left.and.bubble.right.fill"
-        case "slack": return "number.square.fill"
-        case "discord": return "gamecontroller.fill"
-        default: return "bell.fill"
-        }
+        NotificationSource.iconName(for: latestNotification?.source)
     }
 
     private var accentColor: Color {

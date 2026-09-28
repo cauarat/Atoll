@@ -1428,12 +1428,7 @@ struct ContentView: View {
     }
 
     private func appNotificationSneakPeekIcon(for source: String) -> String {
-        switch source {
-        case "mattermost": return "bubble.left.and.bubble.right.fill"
-        case "slack": return "number.square.fill"
-        case "discord": return "gamecontroller.fill"
-        default: return "bell.fill"
-        }
+        NotificationSource.iconName(for: source)
     }
 
     private let reminderTimeFormatter: DateFormatter = {

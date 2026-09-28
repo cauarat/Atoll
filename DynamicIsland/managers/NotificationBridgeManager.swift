@@ -122,7 +122,7 @@ final class NotificationBridgeManager: ObservableObject {
 
     private func showNotificationPopup(_ notification: AppNotification) {
         guard Defaults[.enableMerMotion] else { return }
-        guard notification.source != "mattermost" || Defaults[.enableMattermostNotifications] else { return }
+        guard NotificationSource.isEnabled(notification.source) else { return }
 
         latestNotification = notification
         lastPresentedID = notification.id
@@ -190,7 +190,7 @@ final class NotificationBridgeManager: ObservableObject {
         persist()
     }
 
-    func addTestNotification() {
+    func addTestNotification(source: NotificationSource = .mattermost) {
         // A fresh id every press: each press really is a new notification, and it
         // must get past the duplicate check that real messages go through.
         let testNotification = AppNotification(
@@ -198,11 +198,11 @@ final class NotificationBridgeManager: ObservableObject {
             type: .mention,
             sender: "Test User",
             senderAvatar: nil,
-            channel: "general",
+            channel: source == .mattermost ? "general" : nil,
             channelID: nil,
             body: "This is a test notification from MerMotion!",
             timestamp: Date(),
-            source: "mattermost",
+            source: source.rawValue,
             link: nil,
             isRead: false
         )
@@ -229,12 +229,7 @@ final class NotificationBridgeManager: ObservableObject {
     // MARK: - Helpers
 
     private func iconForSource(_ source: String) -> String {
-        switch source {
-        case "mattermost": return "bubble.left.and.bubble.right.fill"
-        case "slack": return "number.square.fill"
-        case "discord": return "gamecontroller.fill"
-        default: return "bell.fill"
-        }
+        NotificationSource.iconName(for: source)
     }
 
     private func colorForType(_ type: AppNotification.NotificationType) -> Color {

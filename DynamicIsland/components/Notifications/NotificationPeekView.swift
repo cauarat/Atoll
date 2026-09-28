@@ -159,7 +159,8 @@ struct NotificationPeekView: View {
     }
 
     private var canReply: Bool {
-        latestNotification?.source == "mattermost" && latestNotification?.channelID != nil
+        NotificationSource.supportsReply(latestNotification?.source)
+            && latestNotification?.channelID != nil
     }
 
     private func send() {
@@ -228,23 +229,11 @@ struct NotificationPeekView: View {
     }
 
     private var sourceName: String {
-        guard let source = latestNotification?.source else { return "Notification" }
-        switch source {
-        case "mattermost": return "Mattermost"
-        case "slack": return "Slack"
-        case "discord": return "Discord"
-        default: return source.capitalized
-        }
+        NotificationSource.displayName(for: latestNotification?.source)
     }
 
     private var iconForSource: String {
-        guard let source = latestNotification?.source else { return "bell.fill" }
-        switch source {
-        case "mattermost": return "bubble.left.and.bubble.right.fill"
-        case "slack": return "number.square.fill"
-        case "discord": return "gamecontroller.fill"
-        default: return "bell.fill"
-        }
+        NotificationSource.iconName(for: latestNotification?.source)
     }
 
     private var accentColor: Color {

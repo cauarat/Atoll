@@ -1368,6 +1368,8 @@ extension Defaults.Keys {
     static let merMotionDuration = Key<Double>("merMotionDuration", default: 4.5)
     static let merMotionPeekStyle = Key<MerMotionPeekStyle>("merMotionPeekStyle", default: .compact)
     static let enableMattermostNotifications = Key<Bool>("enableMattermostNotifications", default: true)
+    static let enableClickMassaNotifications = Key<Bool>("enableClickMassaNotifications", default: true)
+    static let clickMassaServerURL = Key<String>("clickMassaServerURL", default: "")
     static let mattermostServerURL = Key<String>("mattermostServerURL", default: "")
     static let mattermostUsername = Key<String>("mattermostUsername", default: "")
     static let mattermostConnected = Key<Bool>("mattermostConnected", default: false)

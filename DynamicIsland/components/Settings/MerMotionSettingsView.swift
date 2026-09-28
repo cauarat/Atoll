@@ -10,6 +10,7 @@ struct MerMotionSettingsView: View {
     @Default(.merMotionDuration) private var merMotionDuration
     @Default(.merMotionPeekStyle) private var merMotionPeekStyle
     @Default(.enableMattermostNotifications) private var mattermostEnabled
+    @Default(.enableClickMassaNotifications) private var clickMassaEnabled
     @Default(.mattermostServerURL) private var mattermostServerURL
     @Default(.mattermostMonitoredChannels) private var monitoredChannels
 
@@ -221,7 +222,66 @@ struct MerMotionSettingsView: View {
                 .foregroundColor(.secondary)
 
             mattermostIntegrationSection
+            clickMassaIntegrationSection
         }
+    }
+
+    /// ClickMassa is half-built on purpose: the display path is done and
+    /// testable, but the platform is closed SaaS and its API calls have not been
+    /// identified yet, so there is nothing honest to put behind a Connect
+    /// button. The toggle and the test below exercise everything except the
+    /// network.
+    private var clickMassaIntegrationSection: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack {
+                Image(systemName: NotificationSource.clickMassa.iconName)
+                    .font(.system(size: 20))
+                    .foregroundColor(.green)
+                    .frame(width: 32)
+
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(NotificationSource.clickMassa.displayName)
+                        .font(.system(size: 14, weight: .medium))
+
+                    HStack(spacing: 4) {
+                        Circle()
+                            .fill(Color.gray)
+                            .frame(width: 6, height: 6)
+
+                        Text("Not connected")
+                            .font(.system(size: 11))
+                            .foregroundColor(.secondary)
+                    }
+                }
+
+                Spacer()
+
+                Toggle("", isOn: $clickMassaEnabled)
+                    .toggleStyle(.switch)
+                    .labelsHidden()
+            }
+
+            if clickMassaEnabled {
+                VStack(alignment: .leading, spacing: 8) {
+                    Text("Receiving messages from ClickMassa still needs its API calls identified — it is a closed platform with no public documentation. The notch side is already done: the button below shows what a ClickMassa message will look like.")
+                        .font(.system(size: 11))
+                        .foregroundColor(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+
+                    Button {
+                        notificationBridge.addTestNotification(source: .clickMassa)
+                    } label: {
+                        Text("Preview a ClickMassa notification")
+                            .font(.system(size: 12))
+                    }
+                    .buttonStyle(.bordered)
+                }
+                .padding(.top, 2)
+            }
+        }
+        .padding(12)
+        .background(Color(NSColor.controlBackgroundColor))
+        .clipShape(RoundedRectangle(cornerRadius: 10))
     }
 
     private var mattermostIntegrationSection: some View {
