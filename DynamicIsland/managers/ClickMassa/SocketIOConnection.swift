@@ -30,6 +30,11 @@ final class SocketIOConnection {
         case connected
         /// An `EVENT` frame: the name, and the first argument as raw JSON.
         case event(name: String, payload: Data)
+        /// The namespace turned us away (`CONNECT_ERROR`). On this family that is
+        /// where an auth middleware refuses a token, so the caller should treat
+        /// the session as spent rather than simply reconnecting with it.
+        case rejected(String)
+        /// The transport failed. Says nothing about the credentials.
         case failed(String)
         case closed
     }
@@ -138,7 +143,7 @@ final class SocketIOConnection {
             onEvent(.closed)
 
         case "4":   // CONNECT_ERROR
-            onEvent(.failed(errorMessage(from: rest) ?? String(localized: "Connection refused")))
+            onEvent(.rejected(errorMessage(from: rest) ?? String(localized: "The server refused the session")))
 
         case "2":   // EVENT
             handleEvent(rest)

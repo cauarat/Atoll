@@ -70,6 +70,11 @@ final class NotificationBridgeManager: ObservableObject {
             .sink { [weak self] _ in self?.syncSources() }
             .store(in: &cancellables)
 
+        Defaults.publisher(.enableClickMassaNotifications)
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] _ in self?.syncSources() }
+            .store(in: &cancellables)
+
         syncSources()
     }
 

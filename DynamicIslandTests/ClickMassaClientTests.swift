@@ -17,6 +17,74 @@ import XCTest
 /// ticket in the company -- so it is worth pinning down, and it is pure.
 final class ClickMassaClientTests: XCTestCase {
 
+    // MARK: - Rate limiting
+
+    // 429 is what the server said when the client was signing in on every socket
+    // reconnect. These pin down that the wait is read rather than guessed, and
+    // that the message says what happened -- "Server returned 429" got read as a
+    // rejected password, which is the one thing it does not mean.
+
+    func testReadsRetryAfterInSeconds() {
+        XCTAssertEqual(
+            ClickMassaClient.retryDelay(retryAfter: "120", rateLimitReset: nil),
+            120
+        )
+    }
+
+    func testReadsRetryAfterAsHTTPDate() throws {
+        let now = Date(timeIntervalSince1970: 1_700_000_000)
+        let delay = ClickMassaClient.retryDelay(
+            retryAfter: "Tue, 14 Nov 2023 22:18:20 GMT",   // now + 300
+            rateLimitReset: nil,
+            now: now
+        )
+        XCTAssertEqual(try XCTUnwrap(delay), 300, accuracy: 1)
+    }
+
+    func testFallsBackToRateLimitResetAsTimestamp() throws {
+        let now = Date(timeIntervalSince1970: 1_700_000_000)
+        let delay = ClickMassaClient.retryDelay(
+            retryAfter: nil,
+            rateLimitReset: "1700000060",
+            now: now
+        )
+        XCTAssertEqual(try XCTUnwrap(delay), 60, accuracy: 1)
+    }
+
+    func testReadsRateLimitResetAsSecondsRemaining() {
+        // The same header means a duration on plenty of servers.
+        XCTAssertEqual(
+            ClickMassaClient.retryDelay(retryAfter: nil, rateLimitReset: "45"),
+            45
+        )
+    }
+
+    func testNoHeadersMeansNoKnownWait() {
+        XCTAssertNil(ClickMassaClient.retryDelay(retryAfter: nil, rateLimitReset: nil))
+        XCTAssertNil(ClickMassaClient.retryDelay(retryAfter: "", rateLimitReset: "   "))
+        XCTAssertNil(ClickMassaClient.retryDelay(retryAfter: "soon", rateLimitReset: nil))
+    }
+
+    func testRateLimitMessageSaysItIsNotThePassword() {
+        // Whatever the server sends, the reader has to come away knowing their
+        // password was never the problem.
+        for delay in [nil, 0, 30, 600] as [TimeInterval?] {
+            let message = ClickMassaClient.rateLimitMessage(retryAfter: delay)
+            XCTAssertTrue(
+                message.lowercased().contains("password"),
+                "message for \(String(describing: delay)) never mentions the password: \(message)"
+            )
+            XCTAssertTrue(message.contains("Too many sign-in attempts"))
+        }
+    }
+
+    func testRateLimitMessageRoundsTheWaitUp() {
+        // 90 seconds is "2 minutes", never "1" -- a wait that reads as shorter
+        // than it is invites the retry that deepens the block.
+        XCTAssertTrue(ClickMassaClient.rateLimitMessage(retryAfter: 90).contains("2 minutes"))
+        XCTAssertTrue(ClickMassaClient.rateLimitMessage(retryAfter: 601).contains("11 minutes"))
+    }
+
     // MARK: - URLs
 
     func testDerivesAPIHostFromPanelHost() {

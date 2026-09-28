@@ -242,14 +242,18 @@ struct MerMotionSettingsView: View {
                     Text(NotificationSource.clickMassa.displayName)
                         .font(.system(size: 14, weight: .medium))
 
-                    HStack(spacing: 4) {
+                    // A failure reason is a sentence, not a word. Left on one
+                    // line it gets truncated exactly where it explains itself.
+                    HStack(alignment: .top, spacing: 4) {
                         Circle()
                             .fill(clickMassaStatusColor)
                             .frame(width: 6, height: 6)
+                            .padding(.top, 4)
 
                         Text(clickMassaStatusText)
                             .font(.system(size: 11))
                             .foregroundColor(.secondary)
+                            .fixedSize(horizontal: false, vertical: true)
                     }
                 }
 
@@ -319,7 +323,7 @@ struct MerMotionSettingsView: View {
                                     password: clickMassaPassword
                                 )
                                 ClickMassaTokenStore.shared.setSessionToken("")
-                                clickMassa.connect()
+                                clickMassa.connect(userInitiated: true)
                             }
                             .buttonStyle(.borderedProminent)
                             .disabled(

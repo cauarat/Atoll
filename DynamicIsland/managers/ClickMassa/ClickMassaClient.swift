@@ -45,6 +45,22 @@ final class ClickMassaClient: ObservableObject {
     private static let backoffFloor: TimeInterval = 1
     private static let backoffCeiling: TimeInterval = 30
 
+    /// The floor between two sign-ins. Reconnecting the socket used to re-run the
+    /// whole login, so a few minutes of a flapping socket meant a dozen POSTs to
+    /// `/auth/login` -- which is exactly what a rate limiter answers with 429.
+    /// Reconnects are now the socket's business; signing in happens at most once
+    /// a minute no matter how badly the socket is behaving.
+    private static let minimumLoginInterval: TimeInterval = 60
+
+    /// How long a server-imposed wait can be before it stops being something the
+    /// client sits through on its own.
+    private static let maximumUnattendedRetry: TimeInterval = 15 * 60
+
+    /// The panel itself is a web app, so the API sees a browser. A request with no
+    /// `User-Agent` is the shape bot protection rejects out of hand.
+    private static let userAgent = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
+        + "AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Safari/605.1.15"
+
     // MARK: - Private state
 
     private var socket: SocketIOConnection?
@@ -65,6 +81,18 @@ final class ClickMassaClient: ObservableObject {
     private var currentUserID: Int?
     private var tenantID: Int?
     private var queueNames: [Int: String] = [:]
+
+    /// The login response, held so reconnecting the socket can reuse the session
+    /// rather than signing in again. Memory only: a relaunch costs one login,
+    /// which is the price of not keeping the account on disk.
+    private var cachedAccount: WireAccount?
+
+    /// When the last sign-in was actually sent, for ``minimumLoginInterval``.
+    private var lastLoginAttempt: Date?
+
+    /// A person pressing Sign In has earned an immediate attempt -- correcting a
+    /// typo must not wait out a cooldown meant for the reconnect loop.
+    private var bypassLoginFloorOnce = false
 
     private let session: URLSession = {
         let config = URLSessionConfiguration.ephemeral
@@ -88,9 +116,12 @@ final class ClickMassaClient: ObservableObject {
         connect()
     }
 
-    func connect() {
+    /// - Parameter userInitiated: true when a person pressed Sign In, which skips
+    ///   the sign-in floor once.
+    func connect(userInitiated: Bool = false) {
         isStopping = false
         attempt = 0
+        if userInitiated { bypassLoginFloorOnce = true }
         installSystemObserversIfNeeded()
         startAttempt()
     }
@@ -98,6 +129,7 @@ final class ClickMassaClient: ObservableObject {
     func signOut() {
         disconnect()
         ClickMassaTokenStore.shared.clear()
+        cachedAccount = nil
         currentUserID = nil
         tenantID = nil
         queueNames = [:]
@@ -170,13 +202,15 @@ final class ClickMassaClient: ObservableObject {
     private func runSession(app: URL, generation gen: Int) async {
         let account: WireAccount
         do {
-            account = try await signIn(app: app)
+            account = try await obtainSession(app: app)
         } catch let error as ClientError {
             guard gen == generation else { return }
-            handleFatal(error.text)
+            handleFatal(error.text, retryAfter: error.retryAfter)
+            return
+        } catch is CancellationError {
             return
         } catch {
-            guard gen == generation else { return }
+            guard gen == generation, !Task.isCancelled else { return }
             scheduleReconnect(reason: String(localized: "Server unreachable"))
             return
         }
@@ -188,7 +222,6 @@ final class ClickMassaClient: ObservableObject {
             (account.queues ?? []).map { ($0.id, $0.queue) },
             uniquingKeysWith: { first, _ in first }
         )
-        ClickMassaTokenStore.shared.setSessionToken(account.token)
 
         guard let socketURL = Self.socketURL(app: app, token: account.token) else {
             handleFatal(String(localized: "Could not build a socket URL for this server"))
@@ -227,7 +260,18 @@ final class ClickMassaClient: ObservableObject {
             guard let tenantID, name == "\(tenantID):ticketList" else { return }
             handleTicketList(payload)
 
+        case .rejected(let reason):
+            // CONNECT_ERROR is where a Socket.IO auth middleware turns a bad token
+            // away, so the held session is worthless. Drop it, and the next
+            // attempt signs in again -- still behind the sign-in floor, so a
+            // server that refuses every token cannot turn this into a flood.
+            invalidateSession()
+            scheduleReconnect(reason: reason)
+
         case .failed(let reason):
+            // A dropped socket says nothing about the credentials. Keeping the
+            // session here is the whole point: reconnecting is free, signing in
+            // is what the server counts.
             scheduleReconnect(reason: reason)
 
         case .closed:
@@ -259,10 +303,27 @@ final class ClickMassaClient: ObservableObject {
 
     // MARK: - Reconnect
 
-    private func handleFatal(_ reason: String) {
+    /// Stops and reports. With `retryAfter`, the client sits out the wait the
+    /// server asked for and tries once more -- that is how a rate limit clears
+    /// itself without anyone having to come back and press a button.
+    private func handleFatal(_ reason: String, retryAfter: TimeInterval? = nil) {
         generation += 1
         teardown()
         state = .failed(reason)
+
+        guard !isStopping,
+              let retryAfter,
+              retryAfter > 0,
+              retryAfter <= Self.maximumUnattendedRetry
+        else { return }
+
+        reconnectTask = Task { [weak self] in
+            // The extra second keeps the retry on the far side of the window
+            // rather than on its edge.
+            try? await Task.sleep(for: .seconds(retryAfter + 1))
+            guard !Task.isCancelled, let self, !self.isStopping else { return }
+            self.startAttempt()
+        }
     }
 
     private func scheduleReconnect(reason: String) {
@@ -382,6 +443,46 @@ final class ClickMassaClient: ObservableObject {
 
     // MARK: - REST
 
+    /// The session, reused wherever possible.
+    ///
+    /// This is the fix for the 429: every attempt used to sign in from scratch,
+    /// and `scheduleReconnect` restarts an attempt on each socket failure, so a
+    /// socket that would not stay up meant a POST to `/auth/login` at 1s, 2s, 4s,
+    /// 8s... and then twice a minute forever. Mirrors
+    /// ``MattermostClient.obtainSession``.
+    private func obtainSession(app: URL) async throws -> WireAccount {
+        if let cachedAccount, !ClickMassaTokenStore.shared.sessionToken.isEmpty {
+            return cachedAccount
+        }
+
+        await waitForLoginWindow()
+        try Task.checkCancellation()
+
+        let account = try await signIn(app: app)
+        cachedAccount = account
+        ClickMassaTokenStore.shared.setSessionToken(account.token)
+        return account
+    }
+
+    /// Holds the next sign-in until ``minimumLoginInterval`` has passed.
+    private func waitForLoginWindow() async {
+        if bypassLoginFloorOnce {
+            bypassLoginFloorOnce = false
+            return
+        }
+        guard let lastLoginAttempt else { return }
+        let waited = Date().timeIntervalSince(lastLoginAttempt)
+        guard waited < Self.minimumLoginInterval else { return }
+        try? await Task.sleep(for: .seconds(Self.minimumLoginInterval - waited))
+    }
+
+    /// Forgets the session so the next attempt signs in. Only for a token the
+    /// server actually refused.
+    private func invalidateSession() {
+        cachedAccount = nil
+        ClickMassaTokenStore.shared.setSessionToken("")
+    }
+
     private func signIn(app: URL) async throws -> WireAccount {
         let store = ClickMassaTokenStore.shared
         guard let api = Self.apiURL(forApp: app) else {
@@ -391,11 +492,19 @@ final class ClickMassaClient: ObservableObject {
         var request = URLRequest(url: api.appendingPathComponent("auth/login"))
         request.httpMethod = "POST"
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        // The same headers the panel's own login sends. Bot protection in front of
+        // a login route routinely turns away anything that does not look like the
+        // browser it expects, and 429 is one of the answers it gives.
+        request.setValue("application/json", forHTTPHeaderField: "Accept")
+        request.setValue(Self.userAgent, forHTTPHeaderField: "User-Agent")
+        request.setValue(app.absoluteString, forHTTPHeaderField: "Origin")
+        request.setValue(app.absoluteString + "/", forHTTPHeaderField: "Referer")
         request.httpBody = try JSONSerialization.data(withJSONObject: [
             "email": store.email,
             "password": store.password
         ])
 
+        lastLoginAttempt = Date()
         let (data, response) = try await session.data(for: request)
         guard let http = response as? HTTPURLResponse else {
             throw ClientError(String(localized: "Unexpected response from server"))
@@ -416,9 +525,78 @@ final class ClickMassaClient: ObservableObject {
             // somewhere else on this build, and the message says so rather than
             // leaving it to guesswork.
             throw ClientError(String(localized: "No sign-in endpoint at /auth/login — the route may differ on this server"))
+        case 429:
+            // Not a credential problem: the server refuses on volume before it
+            // ever looks at the password, so this reads the same whether the
+            // password is right or wrong. Saying "429" and nothing else sent one
+            // person retyping a password that was never in question.
+            let delay = Self.retryDelay(
+                retryAfter: http.value(forHTTPHeaderField: "Retry-After"),
+                rateLimitReset: http.value(forHTTPHeaderField: "X-RateLimit-Reset")
+            )
+            throw ClientError(Self.rateLimitMessage(retryAfter: delay), retryAfter: delay)
+        case 500...599:
+            throw ClientError(
+                String(localized: "The ClickMassa server returned an error (\(http.statusCode))"),
+                retryAfter: Self.minimumLoginInterval
+            )
         default:
             throw ClientError(String(localized: "Server returned \(http.statusCode)"))
         }
+    }
+
+    // MARK: - Rate limiting
+
+    /// How long to wait, from whichever header the server chose to send.
+    ///
+    /// `Retry-After` is either a count of seconds or an HTTP date; `X-RateLimit-Reset`
+    /// is either seconds remaining or a Unix timestamp. All four are in the wild,
+    /// so all four are read here.
+    nonisolated static func retryDelay(
+        retryAfter: String?,
+        rateLimitReset: String?,
+        now: Date = Date()
+    ) -> TimeInterval? {
+        if let value = retryAfter?.trimmingCharacters(in: .whitespaces), !value.isEmpty {
+            if let seconds = TimeInterval(value) { return max(0, seconds) }
+            if let date = httpDate(value) {
+                return max(0, date.timeIntervalSince(now))
+            }
+        }
+
+        if let value = rateLimitReset?.trimmingCharacters(in: .whitespaces),
+           let number = TimeInterval(value) {
+            // Past a billion it is a Unix timestamp, not a duration; no rate limit
+            // asks anyone to wait thirty years.
+            let seconds = number > 1_000_000_000 ? number - now.timeIntervalSince1970 : number
+            return max(0, seconds)
+        }
+
+        return nil
+    }
+
+    /// Says what 429 means in words, because the number reads as a mystery and
+    /// gets mistaken for a rejected password.
+    nonisolated static func rateLimitMessage(retryAfter: TimeInterval?) -> String {
+        guard let retryAfter, retryAfter > 0 else {
+            return String(localized: "Too many sign-in attempts — the server is rate-limiting, not rejecting your password. Wait a few minutes before trying again.")
+        }
+        guard retryAfter > 60 else {
+            return String(localized: "Too many sign-in attempts — not a password problem. Try again in a minute.")
+        }
+        let minutes = Int((retryAfter / 60).rounded(.up))
+        return String(localized: "Too many sign-in attempts — not a password problem. Try again in \(minutes) minutes.")
+    }
+
+    /// `Tue, 14 Nov 2023 22:18:20 GMT`. Built on the spot: this runs once per
+    /// 429, which is rare enough that a shared formatter would only be shared
+    /// mutable state for nothing.
+    private nonisolated static func httpDate(_ value: String) -> Date? {
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.timeZone = TimeZone(secondsFromGMT: 0)
+        formatter.dateFormat = "EEE, dd MMM yyyy HH:mm:ss zzz"
+        return formatter.date(from: value)
     }
 
     // MARK: - URLs
@@ -477,7 +655,15 @@ final class ClickMassaClient: ObservableObject {
 
     struct ClientError: Error, LocalizedError {
         let text: String
-        init(_ text: String) { self.text = text }
+        /// Set when the server said how long to wait, so the client can sit the
+        /// wait out instead of handing the problem back to a person.
+        let retryAfter: TimeInterval?
+
+        init(_ text: String, retryAfter: TimeInterval? = nil) {
+            self.text = text
+            self.retryAfter = retryAfter
+        }
+
         var errorDescription: String? { text }
     }
 }
