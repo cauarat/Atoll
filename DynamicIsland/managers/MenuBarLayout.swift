@@ -50,6 +50,14 @@ final class MenuBarLayout: ObservableObject {
     /// Zero when nothing is covered. Capped at the room remaining on the right,
     /// because a shift that pushes the content off the far edge has traded one
     /// covered thing for another.
+    ///
+    /// Zero, too, when stepping aside would carry the content clear off the
+    /// notch. This is a dodge, not an eviction: the content belongs centred on
+    /// the notch, and the panel it is drawn in does not travel with it, so a
+    /// shift of that size leaves it outside its own background. Wide content on
+    /// a laptop screen -- a notification card as wide as the open notch, with
+    /// an app's menus running past the middle of the display -- asked for a
+    /// shift of nearly its own width and was pushed out of sight.
     nonisolated static func clearanceOffset(
         contentWidth: CGFloat,
         screenFrame: CGRect,
@@ -61,7 +69,12 @@ final class MenuBarLayout: ObservableObject {
         let overlap = (menusRightEdge + gap) - contentLeftEdge
         guard overlap > 0 else { return 0 }
         let rightHeadroom = max(0, screenFrame.maxX - (contentLeftEdge + contentWidth))
-        return min(overlap, rightHeadroom)
+        let shift = min(overlap, rightHeadroom)
+
+        // Past half its own width the content no longer covers the screen's
+        // centre, which is where the notch is.
+        guard shift <= contentWidth / 2 else { return 0 }
+        return shift
     }
 
     /// Breathing room between the last menu and the notch content, so they do

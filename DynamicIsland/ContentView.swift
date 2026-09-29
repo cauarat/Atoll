@@ -1047,6 +1047,13 @@ struct ContentView: View {
     private var menuBarClearanceOffset: CGFloat {
         guard vm.notchState == .closed,
               !vm.hideOnClosed,
+              // The notification card is already as wide as the open notch, so
+              // there is no sideways room to dodge into: moving it only slides
+              // it out of the black panel, which stays where it is. On a laptop
+              // screen, where the app's menus reach the middle of the display,
+              // that left a full-width black rectangle with the card clipped
+              // off its right edge. Centred on the notch, every screen matches.
+              !isFullCardNotificationVisible,
               closedContentWidth > 0,
               let menusRightEdge = menuBarLayout.appMenusRightEdge,
               let screenFrame = getScreenFrame(currentScreenName)

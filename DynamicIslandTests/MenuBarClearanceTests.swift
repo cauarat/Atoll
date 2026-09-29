@@ -34,6 +34,32 @@ final class MenuBarClearanceTests: XCTestCase {
         XCTAssertEqual(offset(contentWidth: 300, menusEnd: 705), 8)
     }
 
+    // The notification card is as wide as the open notch, and on this screen an
+    // app's menus run well past where it begins. The dodge it asked for was
+    // nearly its own width -- which does not clear the menus, it just carries
+    // the card off the notch and out of the black panel it is drawn in, leaving
+    // a full-width black rectangle with a sliver of card at the edge.
+
+    func testContentAsWideAsTheNotchStaysPut() {
+        // 626pt of card is centred at 855, so it begins at 542. Xcode's menus
+        // end around 1150 -- an overlap bigger than half the card.
+        XCTAssertEqual(offset(contentWidth: 626, menusEnd: 1150), 0)
+    }
+
+    func testAWideCardStillStepsAsideFromShortMenus() {
+        // The cap is on how far, not on how wide: menus ending at 600 ask for
+        // 66pt, well inside half the card, and that still happens.
+        XCTAssertEqual(offset(contentWidth: 626, menusEnd: 600), 66)
+    }
+
+    func testTheCapIsHalfTheContentWidth() {
+        // 300pt of content begins at 705; menus ending at 847 ask for exactly
+        // 150 -- the last shift that still leaves the content over the centre.
+        XCTAssertEqual(offset(contentWidth: 300, menusEnd: 847), 150)
+        // One point more and it would clear the centre, so it does not move.
+        XCTAssertEqual(offset(contentWidth: 300, menusEnd: 848), 0)
+    }
+
     func testMenusEndingJustShortOfTheGapDoNotMove() {
         XCTAssertEqual(offset(contentWidth: 300, menusEnd: 697), 0)
     }
